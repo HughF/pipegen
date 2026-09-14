@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=pipegen
+GenericName=Expansion chamber designer
+Comment=Two-stroke expansion chamber designer
+Exec=pipegen
+Icon=pipegen
+Terminal=false
+Categories=Engineering;Graphics;

@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- SPDX-License-Identifier: GPL-3.0-or-later. pipegen icon: an expansion
+       chamber in side profile, header to stinger, on the app's dark ground. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#232833"/>
+      <stop offset="1" stop-color="#12141a"/>
+    </linearGradient>
+    <linearGradient id="metal" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffd48a"/>
+      <stop offset="0.45" stop-color="#e59a3c"/>
+      <stop offset="1" stop-color="#8a4f16"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="44" fill="url(#bg)"/>
+  <!-- chamber: header, two diffuser stages, belly, baffle, stinger -->
+  <path d="M26 118 L60 116 L112 94 L150 84 L176 84 L214 121 L234 122
+           L234 134 L214 135 L176 172 L150 172 L112 162 L60 140 L26 138 Z"
+        fill="url(#metal)" stroke="#2a1a08" stroke-width="3" stroke-linejoin="round"/>
+  <!-- joints -->
+  <g stroke="#5a3510" stroke-width="3" stroke-linecap="round">
+    <line x1="60" y1="117" x2="60" y2="139"/>
+    <line x1="112" y1="95" x2="112" y2="161"/>
+    <line x1="150" y1="85" x2="150" y2="171"/>
+    <line x1="176" y1="85" x2="176" y2="171"/>
+    <line x1="214" y1="122" x2="214" y2="134"/>
+  </g>
+  <!-- a flat pattern, as cut: an annular sector -->
+  <path d="M70 214 A150 150 0 0 1 186 214 L168 188 A118 118 0 0 0 88 188 Z"
+        fill="none" stroke="#5cb2ff" stroke-width="5" stroke-linejoin="round"/>
+</svg>
