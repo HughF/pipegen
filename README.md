@@ -10,6 +10,8 @@ for the workshop — for chambers that are rolled and welded or hydroformed.
 
 The default project is a **JLO L372 driving a generator at 2850 rpm**.
 
+![The 3.2 m JLO L372 chamber, auto-folded flat beside the engine](docs/screenshots/design-folded.png)
+
 > **Status.** Built and tested against its own unit tests (ASan + UBSan) and
 > by driving the running program under a virtual display. No chamber has yet
 > been cut, rolled or run from its output. See *What has and has not been
@@ -54,6 +56,40 @@ The default project is a **JLO L372 driving a generator at 2850 rpm**.
     every part at full size with a 100 mm check bar.
 - **Headless** — `--export` and `--render` for scripts and CI.
 - Built-in manual (F1), tooltips on every control, dark and light themes.
+
+## Screenshots
+
+All of the JLO L372 generator project. The 3D view is live OpenGL; the PDF
+pages are the program's own export.
+
+### Designing in 3D
+
+| | |
+|---|---|
+| ![The straight chamber as designed, 3.2 m long](docs/screenshots/design-straight.png) | ![Auto-fold on the Route tab: the most compact flat layout that keeps every bend rule](docs/screenshots/auto-fold.png) |
+| **Straight, as designed.** 3.2 m of pipe for 2850 rpm, with the engine for scale. | **Auto-fold.** The most compact flat layout that keeps every bend rule, with the numbers to prove it. |
+| ![A bent joint selected, with its angle, direction, limit and mitre](docs/screenshots/bending-a-joint.png) | ![A fold into a clearance box around the engine](docs/screenshots/clearance-box.png) |
+| **Bending a joint.** Angle, direction, the limit for that section, and the mitre each piece gets. | **Fit the box.** Folded to keep inside a 1600 × 950 × 900 mm frame, clear of the engine. |
+| ![Hydroformed chamber coloured by part, in the light theme](docs/screenshots/hydroformed-light-theme.png) | ![The New Project wizard, engine step](docs/screenshots/new-project-wizard.png) |
+| **Hydroformed**, coloured by part, in the light theme. | **New Project wizard**: engine, objective, manufacture, installation, review. |
+
+### Patterns, timing and export
+
+| | |
+|---|---|
+| ![A developed diffuser cone with mitred edge and alignment marks](docs/screenshots/patterns-part.png) | ![Every part nested on a 2500 × 1250 sheet](docs/screenshots/patterns-sheet.png) |
+| **A flat part**: a diffuser cone with its mitred edge developed point by point. | **Sheet nesting**: every part on one 2500 × 1250 mm sheet. |
+| ![Side profile and wave-timing plot](docs/screenshots/profile.png) | ![Export page: DXF and PDF options and layers](docs/screenshots/export.png) |
+| **Profile**: the chamber to scale, and when the reflections reach the port across the speed range. | **Export**: DXF for the laser, PDF for the workshop. |
+
+### The PDF
+
+| | | |
+|---|---|---|
+| ![PDF design sheet](docs/screenshots/pdf-design-sheet.png) | ![PDF 3D view and bend schedule](docs/screenshots/pdf-3d-view-and-bends.png) | ![PDF wave timing and cut list](docs/screenshots/pdf-timing-and-cut-list.png) |
+| Design sheet | 3D view and bend schedule | Wave timing and cut list |
+| ![PDF sheet layout](docs/screenshots/pdf-sheet-layout.png) | ![PDF full-size template with check bar](docs/screenshots/pdf-full-size-template.png) | |
+| Sheet layout | A full-size template, with a 100 mm check bar | |
 
 ## Build
 

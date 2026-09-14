@@ -16,6 +16,7 @@ All notable changes to pipegen. Versions are dates (YYYY.MM.DD).
 
 ### Added
 
+- Screenshots of the program and its PDF in the README (docs/screenshots/).
 - Auto-fold (Route tab, and `--autofold compact|box` on the command line):
   searches for the most compact layout, or the roomiest fit in the clearance
   box, that keeps every bend rule and gap, spreading each turn over several
