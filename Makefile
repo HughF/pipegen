@@ -54,7 +54,7 @@ SDL_LIBS   := $(shell sdl2-config --libs 2>/dev/null)
 # The design core: no SDL, no Nuklear. The unit tests and the headless
 # --export path use exactly these.
 CORE = pg_geom pg_project pg_design pg_route pg_pattern pg_dxf pg_pdf pg_report \
-       pg_raster pg_view3d \
+       pg_raster pg_view3d pg_autofold \
        pg_config pg_help pg_model
 
 ifeq ($(OS),Windows_NT)
@@ -69,7 +69,7 @@ OBJS = $(addprefix $(OBJ_DIR)/,$(addsuffix .o,$(CORE) $(PLAT) $(UI)))
 
 TARGET = pipegen
 
-TESTS = test_design test_route test_pattern test_project test_export test_view3d
+TESTS = test_design test_route test_pattern test_project test_export test_view3d test_autofold
 
 .PHONY: all clean distclean test debug run example help-doc \
         windows windows-dist appimage release

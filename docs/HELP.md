@@ -90,7 +90,7 @@ Pieces that leave the clearance box, run into the engine or into the chamber, or
 | **Tuning** | Objective, design speed and gas temperature. |
 | **Chamber** | Every proportion, and a reset to the objective's preset. |
 | **Build** | Method, material, segments, seams and sheet. |
-| **Route** | The list of bends, and where the seams sit. |
+| **Route** | Auto-fold, the list of bends, and where the seams sit. |
 | **Clearance** | The optional clearance box. |
 
 ## Bending the chamber to fit
@@ -112,6 +112,32 @@ The flat pattern of a mitred piece has that edge developed point by point, so it
 > **Note:** Hydroformed chambers can only bend in the plane of their edge welds; an inflated pair of halves cannot twist out of it. Bend directions are turned onto that plane. The Seam plane setting rotates it.
 
 > **Note:** A piece shorter than the mitres at its two ends need is flagged: its cuts would cross. Bend less there, or use fewer segments.
+
+### Bend rules
+
+A sharp mitre reflects part of the pulse early and the flow separates at the corner, worse the fatter the pipe. So every joint is checked against rules of thumb, and one that breaks them gets an amber ring and a warning:
+
+- no joint turns more than its section allows: 30 deg in the header, 25 in the diffuser, 20 in the belly and baffle, 15 into the stinger;
+- no run of bends — a piece bent at both ends — is tighter than twice the pipe's outside diameter.
+
+### Auto-fold
+
+Route > Auto-fold searches for the best layout that keeps every rule and applies it, replacing the bends there were. A turn is always spread over several joints, never made at one.
+
+| | |
+|---|---|
+| **Most compact** | The smallest package, engine included. |
+| **Fit the box** | Inside (or out of) the clearance box, with the most room to spare. Needs a clearance box. |
+| **Any way, Flat, Upright** | Turns in any direction, sideways only, or up and down only. Hydroformed chambers always fold in the plane of their seams. |
+| **Most turns** | How many separate turns it may use. |
+| **Up to segments** | It may cut sections into more pieces, when a gentler turn needs more joints. |
+| **Heat gap** | Distance kept from the engine and from other parts of the chamber, which both change the gas temperature and so the tuning. 40 mm by default. |
+| **Box wall gap** | Distance kept from the clearance box. 20 mm. |
+| **Quick, Normal, Thorough** | How long it searches. Fold again starts somewhere new. |
+
+Among the layouts that keep every rule it prefers the smallest (or the roomiest in the box), then the least bending — counted heavier in the belly and baffle — the fewest turns and joints, and the fewest extra pieces. The search uses a cautious model of the pipe; the winner is checked again with the full surface check, and only a layout that passes is applied. Ctrl+Z, or Revert, puts it back.
+
+> **Note:** The rules are rules of thumb, not a flow simulation. A fold that keeps them should behave very close to the straight design; confirm it on the engine.
 
 ## The clearance box
 
@@ -192,6 +218,6 @@ Parts are turned to their flattest orientation and placed in rows on sheets of t
 |---|---|
 | **Projects** | Plain text .pgp files, key = value, in the folder you choose. Safe to keep in version control. |
 | **Settings** | Theme, folders, recent projects and export choices, in ~/.config/pipegen/settings.conf, or %APPDATA%\pipegen\settings.conf on Windows. |
-| **Command line** | pipegen --project FILE --export DIR NAME writes the exports without opening a window; --render FILE.ppm renders the 3D view. --help lists the rest. |
+| **Command line** | pipegen --project FILE --export DIR NAME writes the exports without opening a window; --autofold compact (or box) folds it first, --save FILE keeps the result, and --render FILE.ppm renders the 3D view. --help lists the rest. |
 | **PIPEGEN_SCALE** | Environment variable overriding the HiDPI scale. |
 

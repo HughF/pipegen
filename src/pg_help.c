@@ -158,7 +158,7 @@ static const PgHelpItem it_view[] = {
     R("Tuning",     "Objective, design speed and gas temperature."),
     R("Chamber",    "Every proportion, and a reset to the objective's preset."),
     R("Build",      "Method, material, segments, seams and sheet."),
-    R("Route",      "The list of bends, and where the seams sit."),
+    R("Route",      "Auto-fold, the list of bends, and where the seams sit."),
     R("Clearance",  "The optional clearance box."),
 };
 
@@ -191,6 +191,45 @@ static const PgHelpItem it_bend[] = {
       "are turned onto that plane. The Seam plane setting rotates it."),
     N("A piece shorter than the mitres at its two ends need is flagged: its "
       "cuts would cross. Bend less there, or use fewer segments."),
+    SUB("Bend rules"),
+    T("A sharp mitre reflects part of the pulse early and the flow separates "
+      "at the corner, worse the fatter the pipe. So every joint is checked "
+      "against rules of thumb, and one that breaks them gets an amber ring "
+      "and a warning:"),
+    B("no joint turns more than its section allows: 30 deg in the header, 25 "
+      "in the diffuser, 20 in the belly and baffle, 15 into the stinger;"),
+    B("no run of bends — a piece bent at both ends — is tighter than twice "
+      "the pipe's outside diameter."),
+    SUB("Auto-fold"),
+    T("Route > Auto-fold searches for the best layout that keeps every rule "
+      "and applies it, replacing the bends there were. A turn is always "
+      "spread over several joints, never made at one."),
+    R("Most compact",   "The smallest package, engine included."),
+    R("Fit the box",    "Inside (or out of) the clearance box, with the most "
+                        "room to spare. Needs a clearance box."),
+    R("Any way, Flat, Upright",
+                        "Turns in any direction, sideways only, or up and "
+                        "down only. Hydroformed chambers always fold in the "
+                        "plane of their seams."),
+    R("Most turns",     "How many separate turns it may use."),
+    R("Up to segments", "It may cut sections into more pieces, when a gentler "
+                        "turn needs more joints."),
+    R("Heat gap",       "Distance kept from the engine and from other parts of "
+                        "the chamber, which both change the gas temperature "
+                        "and so the tuning. 40 mm by default."),
+    R("Box wall gap",   "Distance kept from the clearance box. 20 mm."),
+    R("Quick, Normal, Thorough",
+                        "How long it searches. Fold again starts somewhere "
+                        "new."),
+    T("Among the layouts that keep every rule it prefers the smallest (or "
+      "the roomiest in the box), then the least bending — counted heavier in "
+      "the belly and baffle — the fewest turns and joints, and the fewest "
+      "extra pieces. The search uses a cautious model of the pipe; the "
+      "winner is checked again with the full surface check, and only a "
+      "layout that passes is applied. Ctrl+Z, or Revert, puts it back."),
+    N("The rules are rules of thumb, not a flow simulation. A fold that keeps "
+      "them should behave very close to the straight design; confirm it on "
+      "the engine."),
 };
 
 static const PgHelpItem it_build[] = {
@@ -286,8 +325,10 @@ static const PgHelpItem it_files[] = {
                        "in ~/.config/pipegen/settings.conf, or "
                        "%APPDATA%\\pipegen\\settings.conf on Windows."),
     R("Command line",  "pipegen --project FILE --export DIR NAME writes the "
-                       "exports without opening a window; --render FILE.ppm "
-                       "renders the 3D view. --help lists the rest."),
+                       "exports without opening a window; --autofold compact "
+                       "(or box) folds it first, --save FILE keeps the result, "
+                       "and --render FILE.ppm renders the 3D view. --help "
+                       "lists the rest."),
     R("PIPEGEN_SCALE", "Environment variable overriding the HiDPI scale."),
 };
 

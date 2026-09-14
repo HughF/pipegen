@@ -14,12 +14,13 @@
  * pg_main.c — entry point, command line and frame loop
  *
  *   pipegen [--project FILE] [--wizard]
- *   pipegen [--project FILE] --export DIR NAME
- *   pipegen [--project FILE] --render FILE.ppm [W H]
+ *   pipegen [--project FILE] [--autofold compact|box] [--save FILE]
+ *           [--export DIR NAME] [--render FILE.ppm [W H]]
  *
- * The headless options never open a window: they run the same model and
- * writers the program uses, so a design can be exported from a script, and
- * the 3D view can be checked without a display.
+ * The headless options never open a window: they run the same model, search
+ * and writers the program uses, so a design can be folded and exported from a
+ * script, and the 3D view can be checked without a display. They run in the
+ * order written above.
  */
 #include <SDL2/SDL.h>
 #include <stdio.h>
@@ -33,6 +34,7 @@
 #include "pg_ui.h"
 #include "pg_model.h"
 #include "pg_view3d.h"
+#include "pg_autofold.h"
 #include "pg_help.h"
 #include "pg_version.h"
 
@@ -56,10 +58,13 @@ static void usage(void)
     printf("%s %s — %s\n\n", PIPEGEN_NAME, PIPEGEN_VERSION, PIPEGEN_TAGLINE);
     printf("  pipegen [options]\n\n"
            "  --project FILE        open this project (.pgp)\n"
-           "  --wizard              start in the New Project wizard\n"
+           "  --wizard              start in the New Project wizard\n\n"
+           "Without a window, in this order:\n"
+           "  --autofold GOAL       fold the chamber safely: GOAL is compact, or\n"
+           "                        box (fit the project's clearance box)\n"
+           "  --save FILE           write the project (after any fold)\n"
            "  --export DIR NAME     write NAME.dxf, NAME-P01.dxf... and NAME.pdf\n"
-           "                        into DIR, then exit (no window)\n"
-           "  --render FILE [W H]   render the 3D view to a PPM image, then exit\n"
+           "  --render FILE [W H]   render the 3D view to a PPM image\n\n"
            "  --save-default FILE   write the default JLO L372 project, then exit\n"
            "  --help                this message\n"
            "  --help-doc            write the built-in manual as Markdown\n\n"
@@ -88,11 +93,30 @@ static PgModel *load_model(const char *project)
     return m;
 }
 
-static int run_export(const char *project, const char *dir, const char *name)
+static int run_fold(PgModel *m, const char *goal)
 {
-    PgModel *m = load_model(project);
-    if (!m)
+    PgFoldOpts o;
+    pg_fold_defaults(&o, &m->project);
+    if (strcmp(goal, "compact") == 0) {
+        o.goal = PG_FOLD_COMPACT;
+    } else if (strcmp(goal, "box") == 0) {
+        o.goal = PG_FOLD_FIT_BOX;
+    } else {
+        fprintf(stderr, "pipegen: --autofold wants compact or box, not '%s'\n", goal);
+        return 2;
+    }
+    PgFoldResult r;
+    bool ok = pg_autofold(&m->project, &o, &r);
+    printf("%s\n", r.summary);
+    if (!ok)
         return 1;
+    pg_fold_apply(&m->project, &r);
+    pg_model_update(m);
+    return 0;
+}
+
+static int run_export(PgModel *m, const char *dir, const char *name)
+{
     PgExportOpts o = { true, true, true, true, true };
     char msg[512];
     bool ok = pg_export_files(m, dir, name, &o, msg, sizeof msg);
@@ -103,19 +127,17 @@ static int run_export(const char *project, const char *dir, const char *name)
         printf("check: %s\n", m->chain->warn[i]);
     for (int i = 0; i < m->parts->n_warn; i++)
         printf("check: %s\n", m->parts->warn[i]);
-    pg_model_free(m);
     return ok ? 0 : 1;
 }
 
-static int run_render(const char *project, const char *out, int w, int h)
+static int run_render(PgModel *m, const char *out, int w, int h)
 {
-    PgModel *m = load_model(project);
-    if (!m)
-        return 1;
     PgRaster *r = pg_raster_new(w * 2, h * 2);
     unsigned char *px = malloc((size_t)w * (size_t)h * 4);
     if (!r || !px) {
         fprintf(stderr, "pipegen: out of memory\n");
+        pg_raster_free(r);
+        free(px);
         return 1;
     }
     PgCamera cam;
@@ -127,27 +149,28 @@ static int run_render(const char *project, const char *out, int w, int h)
     pg_view3d_render(r, &cam, &m->project, m->chain, &o, &PG_VIEW_DARK);
     pg_raster_downsample(r, 2, px, w, h);
 
+    int rc = 0;
     FILE *f = fopen(out, "wb");
     if (!f) {
         fprintf(stderr, "pipegen: cannot write %s\n", out);
-        return 1;
+        rc = 1;
+    } else {
+        fprintf(f, "P6\n%d %d\n255\n", w, h);
+        for (int i = 0; i < w * h; i++)
+            fwrite(px + i * 4, 1, 3, f);
+        fclose(f);
+        printf("rendered %s (%d x %d)\n", out, w, h);
     }
-    fprintf(f, "P6\n%d %d\n255\n", w, h);
-    for (int i = 0; i < w * h; i++)
-        fwrite(px + i * 4, 1, 3, f);
-    fclose(f);
-    printf("rendered %s (%d x %d)\n", out, w, h);
     free(px);
     pg_raster_free(r);
-    pg_model_free(m);
-    return 0;
+    return rc;
 }
 
 int main(int argc, char **argv)
 {
     PgUiStart start = { NULL, false };
     const char *export_dir = NULL, *export_name = NULL;
-    const char *render = NULL;
+    const char *render = NULL, *fold = NULL, *save = NULL;
     int render_w = 1280, render_h = 800;
 
     for (int i = 1; i < argc; i++) {
@@ -155,6 +178,10 @@ int main(int argc, char **argv)
             start.project = argv[++i];
         } else if (strcmp(argv[i], "--wizard") == 0) {
             start.wizard = true;
+        } else if (strcmp(argv[i], "--autofold") == 0 && i + 1 < argc) {
+            fold = argv[++i];
+        } else if (strcmp(argv[i], "--save") == 0 && i + 1 < argc) {
+            save = argv[++i];
         } else if (strcmp(argv[i], "--export") == 0 && i + 2 < argc) {
             export_dir = argv[++i];
             export_name = argv[++i];
@@ -191,13 +218,29 @@ int main(int argc, char **argv)
         }
     }
 
-    if (export_dir) {
+    if (fold || save || export_dir || render) {
         console();
-        return run_export(start.project, export_dir, export_name);
-    }
-    if (render) {
-        console();
-        return run_render(start.project, render, render_w, render_h);
+        PgModel *m = load_model(start.project);
+        if (!m)
+            return 1;
+        int rc = 0;
+        if (fold)
+            rc = run_fold(m, fold);
+        if (rc == 0 && save) {
+            char err[256];
+            if (pg_project_save(&m->project, save, err, sizeof err)) {
+                printf("wrote %s\n", save);
+            } else {
+                fprintf(stderr, "pipegen: %s\n", err);
+                rc = 1;
+            }
+        }
+        if (rc == 0 && export_dir)
+            rc = run_export(m, export_dir, export_name);
+        if (rc == 0 && render)
+            rc = run_render(m, render, render_w, render_h);
+        pg_model_free(m);
+        return rc;
     }
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0) {
@@ -243,10 +286,12 @@ int main(int argc, char **argv)
     while (!pg_ui_quit_requested(ui)) {
         SDL_Event e;
         pg_ui_input_begin(ui);
-        /* Nothing here moves on its own: sleep until the operator does
-         * something, rather than redrawing the same frame sixty times a
-         * second. */
-        if (SDL_WaitEventTimeout(&e, 250)) {
+        /* Nothing moves on its own, so sleep until the operator does
+         * something — unless a search is running in the frame loop, which
+         * needs every frame it can get. */
+        bool got = pg_ui_busy(ui) ? SDL_PollEvent(&e) != 0
+                                  : SDL_WaitEventTimeout(&e, 250) != 0;
+        if (got) {
             pg_ui_handle_event(ui, &e);
             while (SDL_PollEvent(&e))
                 pg_ui_handle_event(ui, &e);

@@ -295,10 +295,9 @@ static bool hits_engine(const PgStub *s, const double *p)
     return in_box(p, s->case_min, s->case_max);
 }
 
-/* Closest distance between segments p0-p1 and q0-q1, with the parameters of
- * the closest points. */
-static double seg_seg(const double *p0, const double *p1, const double *q0,
-                      const double *q1, double *sp, double *sq)
+double pg_segment_distance(const double *p0, const double *p1,
+                           const double *q0, const double *q1,
+                           double *sp, double *sq)
 {
     double d1[3], d2[3], r[3];
     v3_sub(d1, p1, p0);
@@ -405,7 +404,7 @@ static void check(const PgProject *pr, PgChain *c)
         for (int j = i + 2; j < c->n_pieces; j++) {
             PgPiece *b = &c->piece[j];
             double sa, sb;
-            double dist = seg_seg(a->p0, a->p1, b->p0, b->p1, &sa, &sb);
+            double dist = pg_segment_distance(a->p0, a->p1, b->p0, b->p1, &sa, &sb);
             double ra = (a->d0 + (a->d1 - a->d0) * sa) / 2.0 + t;
             double rb = (b->d0 + (b->d1 - b->d0) * sb) / 2.0 + t;
             double along = (b->x0 + sb * b->len) - (a->x0 + sa * a->len);
@@ -434,12 +433,84 @@ static void check(const PgProject *pr, PgChain *c)
              c->n_clash_self == 1 ? "" : "s");
 }
 
-void pg_chain_build(const PgProject *p, const PgDesign *d, PgChain *c)
+/* ---- bend rules -------------------------------------------------------- */
+
+double pg_section_joint_limit(PgSectionKind kind)
+{
+    switch (kind) {
+    case PG_SEC_HEADER:   return 30.0;
+    case PG_SEC_DIFFUSER: return 25.0;
+    case PG_SEC_BELLY:    return 20.0;
+    case PG_SEC_BAFFLE:   return 20.0;
+    case PG_SEC_STINGER:  return 15.0;
+    }
+    return 20.0;
+}
+
+double pg_joint_limit(const PgChain *c, int j)
+{
+    if (j < 0 || j >= c->n_joints)
+        return 0.0;
+    const PgJoint *jt = &c->joint[j];
+    return fmin(pg_section_joint_limit(c->piece[jt->before].sec_kind),
+                pg_section_joint_limit(c->piece[jt->after].sec_kind));
+}
+
+double pg_piece_bend_radius_d(const PgChain *c, int i)
+{
+    if (i <= 0 || i >= c->n_pieces - 1)
+        return HUGE_VAL;
+    double a = c->joint[i - 1].bend_deg, b = c->joint[i].bend_deg;
+    if (a < 1e-6 || b < 1e-6)
+        return HUGE_VAL;
+    const PgPiece *pc = &c->piece[i];
+    double R = pc->len / (tan(a * DEG / 2.0) + tan(b * DEG / 2.0));
+    double D = fmax(pc->d0, pc->d1) + 2.0 * c->thickness;
+    return R / D;
+}
+
+static void joint_rules(PgChain *c)
+{
+    c->n_sharp = 0;
+    for (int j = 0; j < c->n_joints; j++) {
+        c->joint[j].limit_deg = pg_joint_limit(c, j);
+        c->joint[j].radius_d = HUGE_VAL;
+        c->joint[j].sharp = false;
+    }
+    for (int i = 1; i + 1 < c->n_pieces; i++) {
+        double rr = pg_piece_bend_radius_d(c, i);
+        if (rr < c->joint[i - 1].radius_d) c->joint[i - 1].radius_d = rr;
+        if (rr < c->joint[i].radius_d)     c->joint[i].radius_d = rr;
+    }
+    for (int j = 0; j < c->n_joints; j++) {
+        PgJoint *jt = &c->joint[j];
+        if (jt->bend_deg < 1e-6)
+            continue;
+        jt->sharp = jt->bend_deg > jt->limit_deg + 1e-6 ||
+                    jt->radius_d < PG_MIN_BEND_RADIUS_D - 1e-9;
+        if (jt->sharp)
+            c->n_sharp++;
+    }
+    if (c->n_sharp)
+        warn(c, "%d joint%s bent too sharply: at most 20-30 deg a joint (by "
+                "section), and runs of bends no tighter than %.0f diameters. "
+                "Spread the turn over more joints, or use Auto-fold.",
+             c->n_sharp, c->n_sharp == 1 ? " is" : "s are", PG_MIN_BEND_RADIUS_D);
+}
+
+void pg_chain_layout(const PgProject *p, const PgDesign *d, PgChain *c)
 {
     memset(c, 0, sizeof *c);
+    c->thickness = p->build.thickness_mm;
     pg_engine_stub(&p->engine, &c->stub);
     build_pieces(p, d, c);
     assign_bends(p, c);
     place_pieces(p, c);
+    joint_rules(c);
+}
+
+void pg_chain_build(const PgProject *p, const PgDesign *d, PgChain *c)
+{
+    pg_chain_layout(p, d, c);
     check(p, c);
 }

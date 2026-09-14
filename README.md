@@ -29,7 +29,14 @@ The default project is a **JLO L372 driving a generator at 2850 rpm**.
 - **Bending** — select a joint and Ctrl+drag (or type the angle and direction).
   Joints are mitred on the bisecting plane, so the centreline — and the wave
   timing — does not change. Clashes with the clearance box, the engine or the
-  chamber itself turn the pieces red.
+  chamber itself turn the pieces red; joints bent more sharply than the bend
+  rules allow get an amber ring.
+- **Auto-fold** — folds a long chamber into the most compact layout, or into
+  the clearance box, that keeps every bend rule: no joint sharper than its
+  section allows (30° header, 25° diffuser, 20° belly and baffle, 15° into the
+  stinger), no run of bends tighter than 2 diameters, a heat gap from the
+  engine and from itself. Every turn is spread over several joints. The
+  winner is re-checked with the full surface check before it is applied.
 - **Rolled and welded** — each piece unrolled on the mean diameter: exact
   annular sectors and rectangles for square ends, point-by-point development
   for mitred ends, seam allowance, alignment marks, header/stinger from tube.
@@ -74,6 +81,7 @@ make release                                 # both, plus SHA256SUMS.txt
 ./pipegen --project my.pgp
 ./pipegen --project my.pgp --export out/ my-chamber    # no window
 ./pipegen --project my.pgp --render view.ppm 1600 900  # no window
+./pipegen --project my.pgp --autofold compact --save folded.pgp
 ./pipegen --help
 ```
 
@@ -90,6 +98,9 @@ make release                                 # both, plus SHA256SUMS.txt
 | `F`, double-click | fit |
 | `1`–`4` | 3/4, side, top, end views |
 | Ctrl+Z / Ctrl+Y | undo / redo |
+
+Route > **Auto-fold** chooses the bends for you: most compact or fit the box,
+any direction or flat or upright, with limits on turns, segments and gaps.
 
 The full manual is in the program (F1) and in [docs/HELP.md](docs/HELP.md),
 generated from the same source by `make help-doc`.
@@ -121,6 +132,11 @@ Proven by the tests (`make test`):
   compensation each flat edge matches its inflated wall;
 - bending preserves the centreline length; mitre planes of adjacent cylinders
   meet exactly; clash detection finds box, engine and self-intersections;
+- the bend rules flag a sharp joint and a tight run; auto-fold's results keep
+  every rule when rebuilt and checked in full, fold the JLO chamber to under
+  half its straight length, fit a box it cannot fit straight, refuse a box it
+  cannot fit at all, keep hydroformed bends in the seam plane, and repeat
+  exactly for the same seed;
 - the DXF is structurally sound (sections, polylines, bulges) and every PDF
   xref offset points at its object;
 - picking in the 3D view returns the piece and joint under the pointer.
@@ -131,6 +147,9 @@ Proven by the tests (`make test`):
   full-size PDF templates before committing a sheet.
 - **Hydroforming compensation is a first-order model.** Inflate a test
   piece.
+- **The bend rules are rules of thumb**, not a flow simulation. A fold that
+  keeps them should behave very close to the straight design; confirm it on
+  the engine.
 - **The JLO L372 preset's port timing and outlet are not factory figures.**
   Bore and stroke (80 × 74 mm) are published; the 155° exhaust duration is a
   figure quoted by owners, and the 38 mm outlet and 40 mm duct are
@@ -144,7 +163,8 @@ Proven by the tests (`make test`):
 |---|---|
 | `src/pg_project.*` | project model and file format |
 | `src/pg_design.*` | wave-timing design: sections, timing band, checks |
-| `src/pg_route.*` | pieces, joints, bends, mitres, engine stub, clashes |
+| `src/pg_route.*` | pieces, joints, bends, mitres, bend rules, engine stub, clashes |
+| `src/pg_autofold.*` | the auto-fold search |
 | `src/pg_pattern.*` | flat patterns and sheet nesting |
 | `src/pg_geom.*` | bulge polylines: exact arcs, boxes, areas |
 | `src/pg_dxf.*`, `src/pg_pdf.*`, `src/pg_report.*` | output |

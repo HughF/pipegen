@@ -50,6 +50,7 @@ void design_init(PgUi *ui)
     ui->view_dirty = true;
     ui->insp = INSP_SELECT;
     ui->drag_joint = -1;
+    pg_fold_defaults(&ui->fold, NULL);
 }
 
 void design_shutdown(PgUi *ui)
@@ -835,6 +836,15 @@ static void panel_joint(PgUi *ui, int j)
                          "and 270 to the sides (at the port)",
                        &roll, 0, 359, 5, "\xc2\xb0");
     ui_info_row(ui, "Turns", bend > 1e-6 ? pg_roll_name(jt->roll_deg) : "straight");
+    ui_info_rowf(ui, "Limit here", "%.0f\xc2\xb0 a joint", jt->limit_deg);
+    if (jt->sharp)
+        ui_label_wrap(ui, jt->bend_deg > jt->limit_deg
+                      ? "Sharper than this section should turn at one joint. "
+                        "Spread the turn over more joints, or use Route > "
+                        "Auto-fold."
+                      : "Part of a run of bends tighter than twice the pipe's "
+                        "diameter. Spread it over longer pieces or fewer "
+                        "segments.", t->warn);
     if (changed)
         set_joint(ui, j, bend, roll);
 
@@ -887,6 +897,181 @@ static void panel_joint(PgUi *ui, int j)
                       "seams; the direction is turned onto it.", t->warn);
 }
 
+/* ------------------------------------------------------------------ */
+/* Auto-fold                                                           */
+/* ------------------------------------------------------------------ */
+
+void design_tick(PgUi *ui)
+{
+    if (!ui->folder)
+        return;
+
+    /* the search started from the project as it was; if that has changed,
+     * its answer is for a different chamber */
+    if (strcmp(ui->cur_text, ui->fold_text) != 0) {
+        pg_fold_end(ui->folder);
+        ui->folder = NULL;
+        ui_message(ui, false, "Auto-fold stopped: the project changed while it "
+                   "was searching.");
+        return;
+    }
+
+    /* a slice that keeps the interface at a usable frame rate */
+    uint64_t t0 = plat_now_ms();
+    bool done;
+    do {
+        done = pg_fold_step(ui->folder, 25);
+    } while (!done && plat_now_ms() - t0 < 30);
+    if (!done)
+        return;
+
+    const PgFoldResult *r = pg_fold_result(ui->folder);
+    snprintf(ui->fold_msg, sizeof ui->fold_msg, "%s", r->summary);
+    ui->fold_ok = r->ok;
+    if (r->ok) {
+        PgProject *p = &ui->model->project;
+        ui->fold_prev_route = p->route;
+        ui->fold_prev_segments = p->build.segments;
+        pg_fold_apply(p, r);
+        ui->fold_can_revert = true;
+        ui->fit_pending = true;
+        ui->vopt.select_id = -1;
+        ui_message(ui, false, "Folded. Ctrl+Z, or Revert on the Route tab, puts "
+                   "it back.");
+    } else {
+        ui_message(ui, true, "Auto-fold found no safe layout; the chamber was "
+                   "left as it was.");
+    }
+    pg_fold_end(ui->folder);
+    ui->folder = NULL;
+}
+
+static void panel_autofold(PgUi *ui)
+{
+    struct nk_context *c = ui->ctx;
+    const PgTheme *t = ui->theme;
+    PgProject *p = &ui->model->project;
+    PgFoldOpts *o = &ui->fold;
+
+    ui_section(ui, "Auto-fold");
+
+    if (ui->folder) {
+        double prog = pg_fold_progress(ui->folder);
+        nk_layout_row_dynamic(c, S(ui, 20), 1);
+        nk_size v = (nk_size)(prog * 1000.0);
+        nk_progress(c, &v, 1000, nk_false);
+        char buf[96];
+        snprintf(buf, sizeof buf, "Searching for the best safe layout \xe2\x80\x94 "
+                 "%.0f%%", prog * 100.0);
+        nk_layout_row_dynamic(c, S(ui, 22), 1);
+        nk_label_colored(c, buf, NK_TEXT_LEFT, t->text_dim);
+        nk_layout_row_dynamic(c, S(ui, 30), 1);
+        ui_tip(ui, "Stop searching; the chamber is left as it is");
+        if (nk_button_label(c, "Stop")) {
+            pg_fold_end(ui->folder);
+            ui->folder = NULL;
+            ui_message(ui, false, "Auto-fold stopped.");
+        }
+        return;
+    }
+
+    ui_label_wrap(ui, "Folds the chamber into the best layout that keeps every "
+                  "rule: no joint sharper than its section allows, runs of bends "
+                  "no tighter than twice the diameter, and clear of the engine, "
+                  "the box and itself by the gaps below. It replaces the bends "
+                  "there are now.", t->text_faint);
+
+    bool box = p->clear.enabled;
+    if (!box && o->goal == PG_FOLD_FIT_BOX)
+        o->goal = PG_FOLD_COMPACT;
+    nk_layout_row_dynamic(c, S(ui, 24), 2);
+    ui_tip(ui, "The smallest package, engine included");
+    if (nk_option_label(c, "Most compact", o->goal == PG_FOLD_COMPACT))
+        o->goal = PG_FOLD_COMPACT;
+    if (!box) nk_widget_disable_begin(c);
+    ui_tip(ui, box ? "Inside (or out of) the clearance box, with the most room to spare"
+                   : "Set a clearance box first, on the Clearance tab");
+    if (nk_option_label(c, "Fit the box", o->goal == PG_FOLD_FIT_BOX) && box)
+        o->goal = PG_FOLD_FIT_BOX;
+    if (!box) nk_widget_disable_end(c);
+
+    bool hydro = p->build.method == PG_MFG_HYDRO;
+    static const struct { const char *l; PgFoldPlane v; const char *tip; } planes[] = {
+        { "Any way", PG_FOLD_ANY,     "Turns in any direction" },
+        { "Flat",    PG_FOLD_FLAT,    "Sideways only: the chamber stays at port height" },
+        { "Upright", PG_FOLD_UPRIGHT, "Up and down only: the chamber stays in one "
+                                      "vertical plane" },
+    };
+    nk_layout_row_dynamic(c, S(ui, 24), 3);
+    if (hydro) nk_widget_disable_begin(c);
+    for (int i = 0; i < 3; i++) {
+        ui_tip(ui, planes[i].tip);
+        if (nk_option_label(c, planes[i].l, o->plane == planes[i].v) && !hydro)
+            o->plane = planes[i].v;
+    }
+    if (hydro) nk_widget_disable_end(c);
+    if (hydro)
+        ui_label_wrap(ui, "Hydroformed: it folds only in the plane of the seams.",
+                      t->text_faint);
+
+    ui_prop_int(ui, "Most turns", "f_turns", "The most separate turns the fold may "
+                "use; each is spread over several joints", &o->max_turns, 1, 4, "");
+    if (o->max_segments < p->build.segments)
+        o->max_segments = p->build.segments;
+    ui_prop_int(ui, "Up to segments", "f_segs", "It may cut sections into more "
+                "pieces, up to this many, when a gentler turn needs more joints",
+                &o->max_segments, p->build.segments, 8, "");
+    ui_prop(ui, "Heat gap", "f_heat", "Keep at least this far from the engine and "
+            "from other parts of the chamber: both change the gas temperature, "
+            "and so the tuning", &o->heat_gap_mm, 0, 300, 5, "mm");
+    if (box)
+        ui_prop(ui, "Box wall gap", "f_wall", "Keep at least this far from the "
+                "clearance box's walls", &o->wall_gap_mm, 0, 200, 5, "mm");
+
+    static const char *effort[3] = { "Quick", "Normal", "Thorough" };
+    static const char *effort_tip[3] = {
+        "A short search: a good layout in a second or two",
+        "A longer search, usually a better layout",
+        "The longest search, for a tight box",
+    };
+    nk_layout_row_dynamic(c, S(ui, 26), 3);
+    for (int i = 0; i < 3; i++) {
+        nk_bool on = o->effort == i + 1;
+        ui_tip(ui, effort_tip[i]);
+        if (nk_selectable_label(c, effort[i], NK_TEXT_CENTERED, &on) && on)
+            o->effort = i + 1;
+    }
+
+    ui_gap(ui, 2);
+    nk_layout_row_dynamic(c, S(ui, 32), 1);
+    ui_tip(ui, ui->fold_msg[0] ? "Search again from a different start; another "
+                                 "safe layout may score better"
+                               : "Search for the best safe fold and apply it. "
+                                 "Ctrl+Z undoes it");
+    if (ui_primary_button(ui, ui->fold_msg[0] ? "Fold again" : "Fold it")) {
+        o->seed++;                     /* each run starts somewhere new */
+        memcpy(ui->fold_text, ui->cur_text, TEXT_MAX);
+        ui->folder = pg_fold_begin(p, o);
+        ui->fold_msg[0] = '\0';
+        if (!ui->folder)
+            ui_message(ui, true, "Out of memory.");
+    }
+
+    if (ui->fold_msg[0])
+        ui_label_wrap(ui, ui->fold_msg, ui->fold_ok ? t->ok : t->warn);
+    if (ui->fold_can_revert) {
+        nk_layout_row_dynamic(c, S(ui, 30), 1);
+        ui_tip(ui, "Put the bends and segments back as they were before the fold");
+        if (nk_button_label(c, "Revert to before the fold")) {
+            p->route = ui->fold_prev_route;
+            p->build.segments = ui->fold_prev_segments;
+            ui->fold_can_revert = false;
+            ui->fold_msg[0] = '\0';
+            ui->fit_pending = true;
+        }
+    }
+}
+
 static void panel_route(PgUi *ui)
 {
     struct nk_context *c = ui->ctx;
@@ -894,9 +1079,11 @@ static void panel_route(PgUi *ui)
     PgModel *m = ui->model;
     const PgChain *ch = m->chain;
 
+    panel_autofold(ui);
+
+    ui_section(ui, "Bends");
     ui_label_wrap(ui, "Bends are made at the joints between pieces. Select a "
                   "joint ring in the view, or one below.", t->text_faint);
-    ui_section(ui, "Bends");
 
     int shown = 0;
     for (int j = 0; j < ch->n_joints; j++) {
@@ -910,8 +1097,8 @@ static void panel_route(PgUi *ui)
         nk_layout_row_template_push_static(c, S(ui, 30));
         nk_layout_row_template_end(c);
         char lab[128];
-        snprintf(lab, sizeof lab, "J%d  %.0f mm   %.0f\xc2\xb0 at %.0f\xc2\xb0",
-                 j + 1, jt->x, jt->bend_deg, jt->roll_deg);
+        snprintf(lab, sizeof lab, "J%d  %.0f mm   %.0f\xc2\xb0 at %.0f\xc2\xb0%s",
+                 j + 1, jt->x, jt->bend_deg, jt->roll_deg, jt->sharp ? "  sharp" : "");
         nk_bool on = ui->vopt.select_id == PG_PICK_JOINT + j;
         ui_tip(ui, "Select this joint");
         if (nk_selectable_label(c, lab, NK_TEXT_LEFT, &on) && on)

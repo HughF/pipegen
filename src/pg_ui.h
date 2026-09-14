@@ -38,4 +38,8 @@ void  pg_ui_render(PgUi *ui);
 void  pg_ui_clear_colour(const PgUi *ui, Uint8 *r, Uint8 *g, Uint8 *b);
 bool  pg_ui_quit_requested(const PgUi *ui);
 
+/* True while work is running in the background of the frame loop (an
+ * auto-fold search), so the loop should not sleep waiting for input. */
+bool  pg_ui_busy(const PgUi *ui);
+
 #endif /* PG_UI_H */

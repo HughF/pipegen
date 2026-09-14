@@ -26,6 +26,7 @@ const PgViewStyle PG_VIEW_DARK = {
     .clash      = { 235,  70,  60 }, .bend       = {  80, 200, 140 },
     .joint      = {  70,  76,  88 }, .seam       = {  40,  44,  52 },
     .box        = { 120, 190, 255 }, .engine     = { 112, 116, 124 },
+    .sharp      = { 240, 170,  50 },
 };
 
 const PgViewStyle PG_VIEW_LIGHT = {
@@ -35,6 +36,7 @@ const PgViewStyle PG_VIEW_LIGHT = {
     .clash      = { 210,  40,  32 }, .bend       = {  24, 150,  90 },
     .joint      = {  92, 100, 114 }, .seam       = {  96, 104, 118 },
     .box        = {  30, 110, 210 }, .engine     = { 150, 154, 162 },
+    .sharp      = { 206, 128,   0 },
 };
 
 /* ------------------------------------------------------------------ */
@@ -486,7 +488,7 @@ static void draw_joints(Ctx *x, const PgProject *pr, const PgChain *c,
 
         const uint8_t *col = st->joint;
         float w = 2.4f;
-        if (jt->bend_deg > 1e-6) { col = st->bend; w = 3.2f; }
+        if (jt->bend_deg > 1e-6) { col = jt->sharp ? st->sharp : st->bend; w = 3.2f; }
         if (o->hover_id == id)   { col = st->hover; w = 4.5f; }
         if (o->select_id == id)  { col = st->select; w = 5.0f; }
 

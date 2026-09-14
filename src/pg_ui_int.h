@@ -34,6 +34,7 @@
 #include "pg_config.h"
 #include "pg_view3d.h"
 #include "pg_draw.h"
+#include "pg_autofold.h"
 #include "plat.h"
 
 /* Unscaled metrics, multiplied by the HiDPI scale at use. */
@@ -150,6 +151,16 @@ struct PgUi {
     double      drag_bend, drag_roll;
     int         drag_joint;
 
+    /* auto-fold, run a slice at a time from the frame loop */
+    PgFoldOpts  fold;
+    PgFolder   *folder;
+    char       *fold_text;           /* the project, as text, when it began */
+    char        fold_msg[480];
+    bool        fold_ok;
+    bool        fold_can_revert;
+    PgRoute     fold_prev_route;
+    int         fold_prev_segments;
+
     /* patterns page */
     int      part_sel;
     int      pattern_tab;              /* 0 part, 1 sheets */
@@ -222,6 +233,7 @@ void  page_design(PgUi *ui, struct nk_rect r);
 void  design_init(PgUi *ui);
 void  design_shutdown(PgUi *ui);
 bool  design_handle_key(PgUi *ui, SDL_Keycode key, Uint16 mod);
+void  design_tick(PgUi *ui);          /* runs a slice of any auto-fold search */
 
 /* ---- pg_ui_pages.c ------------------------------------------------- */
 

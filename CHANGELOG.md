@@ -6,6 +6,17 @@ All notable changes to pipegen. Versions are dates (YYYY.MM.DD).
 
 ### Added
 
+- Auto-fold (Route tab, and `--autofold compact|box` on the command line):
+  searches for the most compact layout, or the roomiest fit in the clearance
+  box, that keeps every bend rule and gap, spreading each turn over several
+  joints and adding segments where a gentler turn needs them; re-checks the
+  winner in full before applying it; undoable, with Revert. `--save FILE`
+  writes the folded project.
+- Bend rules for every joint: at most 30° a joint in the header, 25° in the
+  diffuser, 20° in the belly and baffle, 15° into the stinger, and no run of
+  bends tighter than 2 diameters. Breaking joints get a warning, an amber
+  ring in the 3D view and a note in the joint panel.
+
 - Expansion chamber design by wave timing: tuned length from exhaust
   duration, design speed and mean gas temperature; section proportions and
   diameter ratios per objective (power at a fixed rpm, power across a band,

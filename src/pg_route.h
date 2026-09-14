@@ -71,6 +71,10 @@ typedef struct {
     double pos[3];
     double bend_deg, roll_deg;
     int    bend_index;       /* into project route, or -1                */
+    double limit_deg;        /* the most this joint should turn          */
+    double radius_d;         /* tightest run of bends through it, in     */
+                             /* diameters; HUGE_VAL if not in a run      */
+    bool   sharp;            /* over its limit, or too tight a run       */
 } PgJoint;
 
 /* The engine drawn around the port, from bore and stroke. Rough on purpose:
@@ -92,7 +96,9 @@ typedef struct {
     PgStub  stub;
     double  bmin[3], bmax[3];          /* bounding box of the chamber     */
     double  end[3];                    /* stinger exit centre             */
+    double  thickness;
     int     n_clash_box, n_clash_engine, n_clash_self, n_bad_mitre;
+    int     n_sharp;                   /* joints breaking the bend rules  */
 
     int     n_warn;
     char    warn[8][PG_WARN_LEN];
@@ -100,6 +106,36 @@ typedef struct {
 
 /* PgChain is large; allocate it on the heap. */
 void pg_chain_build(const PgProject *p, const PgDesign *d, PgChain *c);
+
+/* Pieces, bends, positions and the bend rules, without the clash checks —
+ * the part auto-fold evaluates thousands of times. */
+void pg_chain_layout(const PgProject *p, const PgDesign *d, PgChain *c);
+
+/*
+ * Bend rules. Rules of thumb for a pipe that still behaves like the straight
+ * design, not physics: a sharp mitre reflects part of the pulse early and the
+ * flow separates at the corner, and both get worse as the pipe gets fatter.
+ *
+ *   - no joint turns more than its section's limit (the stricter of the two
+ *     pieces it joins): header 30, diffuser 25, belly and baffle 20, into
+ *     the stinger 15 degrees;
+ *   - a run of bends — a piece bent at both ends — is no tighter than
+ *     PG_MIN_BEND_RADIUS_D times the pipe's outside diameter.
+ */
+#define PG_MIN_BEND_RADIUS_D 2.0
+
+double pg_section_joint_limit(PgSectionKind kind);
+double pg_joint_limit(const PgChain *c, int joint);
+
+/* Bend radius, in outside diameters, of the run through piece i when it is
+ * bent at both ends: R = len / (tan(a/2) + tan(b/2)). HUGE_VAL otherwise. */
+double pg_piece_bend_radius_d(const PgChain *c, int piece);
+
+/* Closest distance between segments p0-p1 and q0-q1, with the parameters
+ * (0..1) of the closest points. */
+double pg_segment_distance(const double *p0, const double *p1,
+                           const double *q0, const double *q1,
+                           double *sp, double *sq);
 
 void pg_engine_stub(const PgEngine *e, PgStub *s);
 

@@ -74,6 +74,7 @@ typedef struct {
     uint8_t grid[3], grid_major[3];
     uint8_t select[3], hover[3], clash[3], bend[3];
     uint8_t joint[3], seam[3], box[3], engine[3];
+    uint8_t sharp[3];      /* a joint that breaks the bend rules */
 } PgViewStyle;
 
 extern const PgViewStyle PG_VIEW_DARK;

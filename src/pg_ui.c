@@ -778,6 +778,7 @@ void pg_ui_frame(PgUi *ui, int w, int h)
     }
 
     sync_model(ui);
+    design_tick(ui);
     update_title(ui);
     ui->tip_text[0] = '\0';
 
@@ -903,10 +904,11 @@ PgUi *pg_ui_create(SDL_Window *win, SDL_Renderer *ren, const PgUiStart *start)
     ui->cur_text = calloc(1, TEXT_MAX);
     ui->undo = calloc(UNDO_MAX, sizeof *ui->undo);
     ui->entries = calloc(FILE_ENTRIES, sizeof *ui->entries);
+    ui->fold_text = calloc(1, TEXT_MAX);
     ui->model = pg_model_new();
     ui->wiz_model = pg_model_new();
     if (!ui->saved_text || !ui->cur_text || !ui->undo || !ui->entries ||
-        !ui->model || !ui->wiz_model) {
+        !ui->fold_text || !ui->model || !ui->wiz_model) {
         pg_ui_destroy(ui);
         return NULL;
     }
@@ -992,6 +994,8 @@ void pg_ui_destroy(PgUi *ui)
     free(ui->cur_text);
     free(ui->undo);
     free(ui->entries);
+    pg_fold_end(ui->folder);
+    free(ui->fold_text);
     free(ui);
 }
 
@@ -1068,3 +1072,5 @@ void pg_ui_clear_colour(const PgUi *ui, Uint8 *r, Uint8 *g, Uint8 *b)
 }
 
 bool pg_ui_quit_requested(const PgUi *ui) { return ui->quit; }
+
+bool pg_ui_busy(const PgUi *ui) { return ui->folder != NULL; }
