@@ -63,7 +63,7 @@ else
     PLAT = plat_posix
 endif
 
-UI   = pg_theme pg_draw pg_ui pg_ui_design pg_ui_pages pg_ui_dialogs pg_main
+UI   = pg_theme pg_draw pg_gl pg_glview pg_ui pg_ui_design pg_ui_pages pg_ui_dialogs pg_main
 
 OBJS = $(addprefix $(OBJ_DIR)/,$(addsuffix .o,$(CORE) $(PLAT) $(UI)))
 

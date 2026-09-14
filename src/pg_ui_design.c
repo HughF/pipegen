@@ -58,15 +58,71 @@ void design_shutdown(PgUi *ui)
     if (ui->tex)
         SDL_DestroyTexture(ui->tex);
     ui->tex = NULL;
+    pg_glview_free(ui->glv);
+    ui->glv = NULL;
+    pg_mesh_free(&ui->mesh);
     pg_raster_free(ui->raster);
     ui->raster = NULL;
     free(ui->tex_pixels);
     ui->tex_pixels = NULL;
 }
 
+static bool same_opts(const PgViewOpts *a, const PgViewOpts *b)
+{
+    return a->colour == b->colour && a->show_engine == b->show_engine &&
+           a->show_box == b->show_box && a->show_seams == b->show_seams &&
+           a->show_grid == b->show_grid && a->hover_id == b->hover_id &&
+           a->select_id == b->select_id &&
+           a->highlight_section == b->highlight_section;
+}
+
+/* On the GPU the scene is rebuilt only when what it shows has changed —
+ * the project, the view options, the theme — and moving the camera just
+ * draws it again. */
+static void render_view_gl(PgUi *ui, int w, int h)
+{
+    const PgViewStyle *st = ui->dark ? &PG_VIEW_DARK : &PG_VIEW_LIGHT;
+    if (!ui->mesh_ok || ui->mesh_gen != ui->model->generation ||
+        ui->mesh_dark != ui->dark || !same_opts(&ui->mesh_vopt, &ui->vopt)) {
+        if (!pg_view3d_mesh(&ui->mesh, &ui->model->project, ui->model->chain,
+                            &ui->vopt, st))
+            ui_message(ui, true, "Not enough memory for the whole 3D view.");
+        pg_glview_upload(ui->glv, &ui->mesh);
+        ui->mesh_ok = true;
+        ui->mesh_gen = ui->model->generation;
+        ui->mesh_dark = ui->dark;
+        ui->mesh_vopt = ui->vopt;
+        ui->view_dirty = true;
+    }
+    if (ui->view_dirty || ui->tex_w != w || ui->tex_h != h) {
+        /* Mesh line widths assume a 2x supersampled raster; here a pixel is
+         * a screen pixel, and the interface is scaled for density. */
+        if (!pg_glview_render(ui->glv, &ui->cam, w, h, st, ui->scale * 0.5f))
+            ui_message(ui, true, "The graphics driver could not make a %d x %d 3D view.",
+                       w, h);
+        ui->tex_w = w;
+        ui->tex_h = h;
+        ui->view_dirty = false;
+        ui->view_gen = ui->model->generation;
+    }
+}
+
 static void render_view(PgUi *ui, int w, int h)
 {
-    if (w < 8 || h < 8 || !ui->raster)
+    if (w < 8 || h < 8)
+        return;
+
+    if (ui->fit_pending) {
+        pg_camera_fit(&ui->cam, ui->model->chain, ui->vopt.show_engine,
+                      (double)w / (double)h);
+        ui->fit_pending = false;
+        ui->view_dirty = true;
+    }
+    if (ui->glv) {
+        render_view_gl(ui, w, h);
+        return;
+    }
+    if (!ui->raster)
         return;
 
     /* Supersample small views for smooth edges; a view this large on a
@@ -90,13 +146,6 @@ static void render_view(PgUi *ui, int w, int h)
         ui->tex_w = w;
         ui->tex_h = h;
         ui->ss = ss;
-        ui->view_dirty = true;
-    }
-
-    if (ui->fit_pending) {
-        pg_camera_fit(&ui->cam, ui->model->chain, ui->vopt.show_engine,
-                      (double)w / (double)h);
-        ui->fit_pending = false;
         ui->view_dirty = true;
     }
 
@@ -231,7 +280,9 @@ static void view_input(PgUi *ui, struct nk_rect vr)
     /* what is under the pointer */
     if (ui->drag == DRAG_NONE) {
         int id = -1;
-        if (over)
+        if (over && ui->glv)
+            id = pg_glview_pick(ui->glv, (int)(mx - vr.x), (int)(my - vr.y));
+        else if (over)
             id = pg_raster_id_at(ui->raster, (int)((mx - vr.x) * ui->ss),
                                  (int)((my - vr.y) * ui->ss));
         if (id == PG_PICK_ENGINE)
@@ -1356,7 +1407,13 @@ void page_design(PgUi *ui, struct nk_rect r)
     view_input(ui, vr);
     render_view(ui, (int)vr.w, (int)vr.h);
 
-    if (ui->tex) {
+    if (ui->glv) {
+        unsigned tex = pg_glview_texture(ui->glv);
+        if (tex) {
+            struct nk_image img = nk_image_id((int)tex);
+            nk_draw_image(nk_window_get_canvas(c), vr, &img, nk_rgba(255, 255, 255, 255));
+        }
+    } else if (ui->tex) {
         struct nk_image img = nk_image_ptr(ui->tex);
         nk_draw_image(nk_window_get_canvas(c), vr, &img, nk_rgba(255, 255, 255, 255));
     }

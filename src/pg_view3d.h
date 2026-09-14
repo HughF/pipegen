@@ -80,6 +80,50 @@ typedef struct {
 extern const PgViewStyle PG_VIEW_DARK;
 extern const PgViewStyle PG_VIEW_LIGHT;
 
+/*
+ * The scene as geometry: independent of the camera, so it is built once per
+ * change and drawn from any angle — by the software rasteriser here, or by
+ * the GPU (pg_glview). Opaque and translucent triangles index one vertex
+ * array; lines are kept as segments because both renderers widen them in
+ * screen space.
+ *
+ * Line widths are in pixels of the supersampled raster the view is normally
+ * drawn at (twice the screen's pixels on an ordinary display).
+ */
+typedef struct {
+    float   p[3];
+    float   n[3];          /* zero for a surface drawn unlit          */
+    uint8_t col[4];        /* alpha < 255 only in the translucent list */
+    int32_t id;            /* a PG_PICK value                          */
+    float   bias;          /* towards the viewer, fraction of depth    */
+} PgMeshVert;
+
+typedef struct {
+    float   a[3], b[3];
+    uint8_t col[4];
+    int32_t id;
+    float   width;
+    float   bias;
+} PgMeshLine;
+
+typedef struct {
+    PgMeshVert *vert;  int n_vert, cap_vert;
+    uint32_t   *tri;   int n_tri, cap_tri;       /* opaque: 3 indices each      */
+    uint32_t   *glass; int n_glass, cap_glass;   /* translucent: 3 indices each */
+    PgMeshLine *line;  int n_line, cap_line;
+    bool        oom;
+} PgMesh;
+
+/* The camera as a frame: view space is (right, up, forward) from the eye,
+ * and the screen point of view-space v is (cx + focal v.x / v.z,
+ * cy - focal v.y / v.z). light is the key light's direction. */
+typedef struct {
+    double eye[3], r[3], u[3], f[3];
+    double light[3];
+    double focal, cx, cy;
+    double near_z;
+} PgViewFrame;
+
 void pg_camera_default(PgCamera *cam);
 void pg_camera_preset(PgCamera *cam, PgViewPreset v);
 
@@ -99,6 +143,19 @@ void pg_camera_zoom_at(PgCamera *cam, double factor, double sx, double sy,
 bool pg_camera_project(const PgCamera *cam, int view_w, int view_h,
                        const double p[3], double *sx, double *sy);
 
+void pg_camera_frame(const PgCamera *cam, int view_w, int view_h, PgViewFrame *fr);
+
+/* Build the scene into m, reusing its allocations. False if out of memory
+ * (m then holds part of the scene). */
+bool pg_view3d_mesh(PgMesh *m, const PgProject *pr, const PgChain *c,
+                    const PgViewOpts *o, const PgViewStyle *st);
+void pg_mesh_free(PgMesh *m);
+
+/* Draw a built scene into the raster with the software rasteriser. */
+void pg_view3d_draw(PgRaster *r, const PgCamera *cam, const PgMesh *m,
+                    const PgViewStyle *st);
+
+/* Build and draw in one go. */
 void pg_view3d_render(PgRaster *r, const PgCamera *cam, const PgProject *pr,
                       const PgChain *c, const PgViewOpts *o,
                       const PgViewStyle *st);

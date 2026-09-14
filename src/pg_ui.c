@@ -17,6 +17,8 @@
 #define NK_SDL_RENDERER_IMPLEMENTATION
 #include "nk.h"
 #include "nuklear_sdl_renderer.h"
+#include <math.h>
+#include "pg_nkgl.h"
 
 #include "pg_ui_int.h"
 #include "pg_help.h"
@@ -824,19 +826,28 @@ void pg_ui_frame(PgUi *ui, int w, int h)
 /* Lifetime                                                            */
 /* ------------------------------------------------------------------ */
 
-static float detect_scale(SDL_Window *win, SDL_Renderer *ren)
+void pg_ui_output_size(const PgUi *ui, int *w, int *h)
+{
+    *w = *h = 0;
+    if (ui->ren)
+        SDL_GetRendererOutputSize(ui->ren, w, h);
+    else
+        SDL_GL_GetDrawableSize(ui->win, w, h);
+}
+
+static float detect_scale(const PgUi *ui)
 {
     const char *env = getenv("PIPEGEN_SCALE");
     if (env && atof(env) > 0.1)
         return (float)atof(env);
 
     int ww = 0, wh = 0, dw = 0, dh = 0;
-    SDL_GetWindowSize(win, &ww, &wh);
-    SDL_GetRendererOutputSize(ren, &dw, &dh);
+    SDL_GetWindowSize(ui->win, &ww, &wh);
+    pg_ui_output_size(ui, &dw, &dh);
     float scale = (ww > 0) ? (float)dw / (float)ww : 1.0f;
 
     float ddpi = 0;
-    if (SDL_GetDisplayDPI(SDL_GetWindowDisplayIndex(win), &ddpi, NULL, NULL) == 0) {
+    if (SDL_GetDisplayDPI(SDL_GetWindowDisplayIndex(ui->win), &ddpi, NULL, NULL) == 0) {
         float dpi_scale = ddpi / 96.0f;
         if (dpi_scale > scale)
             scale = dpi_scale;
@@ -890,16 +901,26 @@ static void load_font(PgUi *ui)
             continue;
         font = nk_font_atlas_add_from_file(atlas, candidates[i], 14.0f * ui->scale, &cfg);
     }
-    nk_sdl_font_stash_end();
+    if (ui->ren)
+        nk_sdl_font_stash_end();
+    else
+        pg_nkgl_font_stash_end();
     if (font)
         nk_style_set_font(ui->ctx, &font->handle);
 }
 
-PgUi *pg_ui_create(SDL_Window *win, SDL_Renderer *ren, const PgUiStart *start)
+PgUi *pg_ui_create(const PgUiVideo *video, const PgUiStart *start)
 {
     PgUi *ui = calloc(1, sizeof *ui);
-    if (!ui)
+    if (!ui) {
+        pg_glview_free(video->glview);
         return NULL;
+    }
+    ui->win = video->win;
+    ui->ren = video->ren;
+    ui->glv = video->glview;
+    snprintf(ui->renderer, sizeof ui->renderer, "%s",
+             video->renderer ? video->renderer : "");
     ui->saved_text = calloc(1, TEXT_MAX);
     ui->cur_text = calloc(1, TEXT_MAX);
     ui->undo = calloc(UNDO_MAX, sizeof *ui->undo);
@@ -913,16 +934,22 @@ PgUi *pg_ui_create(SDL_Window *win, SDL_Renderer *ren, const PgUiStart *start)
         return NULL;
     }
 
-    ui->win = win;
-    ui->ren = ren;
     pg_settings_load(&ui->settings);
     ui->dark = ui->settings.dark;
     ui->theme = ui->dark ? &PG_THEME_DARK : &PG_THEME_LIGHT;
-    ui->scale = detect_scale(win, ren);
+    ui->scale = detect_scale(ui);
     ui->page = PAGE_DESIGN;
     ui->last_page = PAGE_COUNT;
 
-    ui->ctx = nk_sdl_init(win, ren);
+    if (!ui->ren) {
+        char err[512];
+        if (!pg_nkgl_init(err, sizeof err)) {
+            fprintf(stderr, "pipegen: OpenGL interface: %s\n", err);
+            pg_ui_destroy(ui);
+            return NULL;
+        }
+    }
+    ui->ctx = nk_sdl_init(ui->win, ui->ren);
     if (!ui->ctx) {
         pg_ui_destroy(ui);
         return NULL;
@@ -954,7 +981,7 @@ void pg_ui_fit_window(PgUi *ui, int base_w, int base_h)
         return;
     int ww = 0, wh = 0, dw = 0, dh = 0;
     SDL_GetWindowSize(ui->win, &ww, &wh);
-    SDL_GetRendererOutputSize(ui->ren, &dw, &dh);
+    pg_ui_output_size(ui, &dw, &dh);
     float px_per_unit = (ww > 0 && dw > 0) ? (float)dw / (float)ww : 1.0f;
 
     float unit_scale = ui->scale / px_per_unit;
@@ -986,8 +1013,12 @@ void pg_ui_destroy(PgUi *ui)
     if (ui->ctx) {
         pg_settings_save(&ui->settings);
         design_shutdown(ui);
-        nk_sdl_shutdown();
+        if (ui->ren)
+            nk_sdl_shutdown();
+        else
+            pg_nkgl_shutdown();
     }
+    pg_glview_free(ui->glv);
     pg_model_free(ui->model);
     pg_model_free(ui->wiz_model);
     free(ui->saved_text);
@@ -1062,13 +1093,25 @@ bool pg_ui_handle_event(PgUi *ui, SDL_Event *e)
     return nk_sdl_handle_event(e) != 0;
 }
 
-void pg_ui_render(PgUi *ui) { nk_sdl_render(NK_ANTI_ALIASING_ON); }
-
-void pg_ui_clear_colour(const PgUi *ui, Uint8 *r, Uint8 *g, Uint8 *b)
+void pg_ui_present(PgUi *ui)
 {
-    *r = ui->theme->bg.r;
-    *g = ui->theme->bg.g;
-    *b = ui->theme->bg.b;
+    const struct nk_color bg = ui->theme->bg;
+    if (ui->ren) {
+        SDL_SetRenderDrawColor(ui->ren, bg.r, bg.g, bg.b, 255);
+        SDL_RenderClear(ui->ren);
+        nk_sdl_render(NK_ANTI_ALIASING_ON);
+        SDL_RenderPresent(ui->ren);
+        return;
+    }
+    int w, h;
+    pg_ui_output_size(ui, &w, &h);
+    gl.BindFramebuffer(GL_FRAMEBUFFER, 0);
+    gl.Viewport(0, 0, w, h);
+    gl.Disable(GL_SCISSOR_TEST);
+    gl.ClearColor(bg.r / 255.0f, bg.g / 255.0f, bg.b / 255.0f, 1.0f);
+    gl.Clear(GL_COLOR_BUFFER_BIT);
+    pg_nkgl_render(w, h, NK_ANTI_ALIASING_ON);
+    SDL_GL_SwapWindow(ui->win);
 }
 
 bool pg_ui_quit_requested(const PgUi *ui) { return ui->quit; }

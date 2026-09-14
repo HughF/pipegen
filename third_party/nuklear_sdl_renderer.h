@@ -237,9 +237,11 @@ nk_sdl_init(SDL_Window *win, SDL_Renderer *renderer)
     SDL_version runtimeVer;
 
     /* warn for cases where NK_SDL_CLAMP_CLIP_RECT should have been set but isn't */
-    SDL_GetRendererInfo(renderer, &info);
+    /* LOCAL FIX: pipegen passes no renderer when it draws with OpenGL, and
+     * info.name was then read uninitialised. */
     SDL_GetVersion(&runtimeVer);
-    if (strncmp("metal", info.name, 5) == 0 &&
+    if (renderer && SDL_GetRendererInfo(renderer, &info) == 0 &&
+        strncmp("metal", info.name, 5) == 0 &&
         SDL_VERSIONNUM(runtimeVer.major, runtimeVer.minor, runtimeVer.patch) < SDL_VERSIONNUM(2, 0, 22))
     {
         SDL_LogWarn(

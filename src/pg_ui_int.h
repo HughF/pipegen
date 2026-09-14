@@ -33,6 +33,7 @@
 #include "pg_model.h"
 #include "pg_config.h"
 #include "pg_view3d.h"
+#include "pg_glview.h"
 #include "pg_draw.h"
 #include "pg_autofold.h"
 #include "plat.h"
@@ -81,7 +82,8 @@ typedef enum { DRAG_NONE, DRAG_PENDING, DRAG_ORBIT, DRAG_PAN, DRAG_BEND } DragMo
 struct PgUi {
     struct nk_context *ctx;
     SDL_Window        *win;
-    SDL_Renderer      *ren;
+    SDL_Renderer      *ren;              /* NULL when drawing with OpenGL */
+    char               renderer[200];
 
     PgModel    *model;
     PgSettings  settings;
@@ -138,6 +140,11 @@ struct PgUi {
     PgCamera    cam;
     PgViewOpts  vopt;
     bool        fit_pending;
+    PgGlView   *glv;                   /* the GPU view, or NULL for software */
+    PgMesh      mesh;                  /* what glv holds, and what it shows: */
+    bool        mesh_ok, mesh_dark;
+    unsigned    mesh_gen;
+    PgViewOpts  mesh_vopt;
     PgRaster   *raster;
     uint8_t    *tex_pixels;
     SDL_Texture *tex;

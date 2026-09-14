@@ -32,6 +32,8 @@
 #endif
 
 #include "pg_ui.h"
+#include "pg_gl.h"
+#include "pg_glview.h"
 #include "pg_model.h"
 #include "pg_view3d.h"
 #include "pg_autofold.h"
@@ -51,6 +53,97 @@ static void console(void)
         freopen("CONOUT$", "w", stderr);
     }
 #endif
+}
+
+static SDL_Window *make_window(Uint32 flags)
+{
+    return SDL_CreateWindow(PIPEGEN_NAME " " PIPEGEN_VERSION,
+                            SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, BASE_W, BASE_H,
+                            SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE |
+                            SDL_WINDOW_ALLOW_HIGHDPI | flags);
+}
+
+/*
+ * The interface and the 3D view drawn with OpenGL 3.3. NULL, with the reason
+ * on stderr and nothing left open, if this machine cannot — a virtual machine
+ * without 3D, a Remote Desktop session, an old driver — and the program then
+ * draws in software as it always could.
+ */
+static PgUi *start_gl(const PgUiStart *start, SDL_Window **win_out, SDL_GLContext *glc_out)
+{
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG);
+    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 0);    /* the view has its own */
+
+    char why[512] = "";
+    PgUi *ui = NULL;
+    SDL_Window *win = make_window(SDL_WINDOW_OPENGL);
+    SDL_GLContext glc = win ? SDL_GL_CreateContext(win) : NULL;
+    if (!win || !glc) {
+        snprintf(why, sizeof why, "%s", SDL_GetError());
+    } else if (pg_gl_load(why, sizeof why)) {
+        PgGlView *view = pg_glview_new(why, sizeof why);
+        if (view) {
+            char desc[200];
+            pg_gl_describe(desc, sizeof desc);
+            SDL_GL_SetSwapInterval(1);
+            PgUiVideo video = { .win = win, .glview = view, .renderer = desc };
+            ui = pg_ui_create(&video, start);
+            if (!ui)
+                snprintf(why, sizeof why, "the interface could not start");
+        }
+    }
+    if (ui) {
+        *win_out = win;
+        *glc_out = glc;
+        return ui;
+    }
+    fprintf(stderr, "pipegen: no OpenGL 3.3 (%s); drawing in software\n", why);
+    if (glc)
+        SDL_GL_DeleteContext(glc);
+    if (win)
+        SDL_DestroyWindow(win);
+    SDL_GL_ResetAttributes();   /* SDL's own GL renderer wants its defaults */
+    return NULL;
+}
+
+static PgUi *start_software(const PgUiStart *start, SDL_Window **win_out,
+                            SDL_Renderer **ren_out)
+{
+    SDL_Window *win = make_window(0);
+    if (!win) {
+        fprintf(stderr, "SDL_CreateWindow: %s\n", SDL_GetError());
+        return NULL;
+    }
+    SDL_Renderer *ren = SDL_CreateRenderer(
+        win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    if (!ren)
+        ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE);
+    if (!ren) {
+        fprintf(stderr, "SDL_CreateRenderer: %s\n", SDL_GetError());
+        SDL_DestroyWindow(win);
+        return NULL;
+    }
+    SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+
+    char desc[200] = "software 3D view";
+    SDL_RendererInfo info;
+    if (SDL_GetRendererInfo(ren, &info) == 0)
+        snprintf(desc, sizeof desc, "software 3D view, SDL %s renderer", info.name);
+    PgUiVideo video = { .win = win, .ren = ren, .renderer = desc };
+    PgUi *ui = pg_ui_create(&video, start);
+    if (!ui) {
+        fprintf(stderr, "pipegen: cannot create the interface\n");
+        SDL_DestroyRenderer(ren);
+        SDL_DestroyWindow(win);
+        return NULL;
+    }
+    *win_out = win;
+    *ren_out = ren;
+    return ui;
 }
 
 static void usage(void)
@@ -249,33 +342,16 @@ int main(int argc, char **argv)
     }
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "best");
 
-    SDL_Window *win = SDL_CreateWindow(
-        PIPEGEN_NAME " " PIPEGEN_VERSION,
-        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, BASE_W, BASE_H,
-        SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
-    if (!win) {
-        fprintf(stderr, "SDL_CreateWindow: %s\n", SDL_GetError());
-        SDL_Quit();
-        return 1;
-    }
-
-    SDL_Renderer *ren = SDL_CreateRenderer(
-        win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-    if (!ren)
-        ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE);
-    if (!ren) {
-        fprintf(stderr, "SDL_CreateRenderer: %s\n", SDL_GetError());
-        SDL_DestroyWindow(win);
-        SDL_Quit();
-        return 1;
-    }
-    SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
-
-    PgUi *ui = pg_ui_create(win, ren, &start);
+    SDL_Window *win = NULL;
+    SDL_Renderer *ren = NULL;
+    SDL_GLContext glc = NULL;
+    PgUi *ui = NULL;
+    const char *choice = getenv("PIPEGEN_RENDERER");
+    if (!choice || strcmp(choice, "software") != 0)
+        ui = start_gl(&start, &win, &glc);
+    if (!ui)
+        ui = start_software(&start, &win, &ren);
     if (!ui) {
-        fprintf(stderr, "pipegen: cannot create the interface\n");
-        SDL_DestroyRenderer(ren);
-        SDL_DestroyWindow(win);
         SDL_Quit();
         return 1;
     }
@@ -299,19 +375,16 @@ int main(int argc, char **argv)
         pg_ui_input_end(ui);
 
         int w = 0, h = 0;
-        SDL_GetRendererOutputSize(ren, &w, &h);
+        pg_ui_output_size(ui, &w, &h);
         pg_ui_frame(ui, w, h);
-
-        Uint8 r, g, b;
-        pg_ui_clear_colour(ui, &r, &g, &b);
-        SDL_SetRenderDrawColor(ren, r, g, b, 255);
-        SDL_RenderClear(ren);
-        pg_ui_render(ui);
-        SDL_RenderPresent(ren);
+        pg_ui_present(ui);
     }
 
-    pg_ui_destroy(ui);
-    SDL_DestroyRenderer(ren);
+    pg_ui_destroy(ui);                  /* while its GL context still exists */
+    if (ren)
+        SDL_DestroyRenderer(ren);
+    if (glc)
+        SDL_GL_DeleteContext(glc);
     SDL_DestroyWindow(win);
     SDL_Quit();
     return 0;

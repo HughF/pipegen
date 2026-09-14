@@ -142,7 +142,70 @@ static void test_pick_chamber(void)
     pg_model_free(m);
 }
 
+/* The mesh is what the GPU draws, so check it stands on its own: indices in
+ * range, every piece and joint present with its id, glass only for the box,
+ * and rebuilding into the same mesh gives the same scene. */
+static void test_mesh(void)
+{
+    PgModel *m = pg_model_new();
+    m->project.clear.enabled = true;
+    pg_model_update(m);
+    PgViewOpts o = { .colour = PG_COLOUR_SECTION, .show_engine = true,
+                     .show_box = true, .show_seams = true, .show_grid = true,
+                     .hover_id = -1, .select_id = -1, .highlight_section = -1 };
+    PgMesh mesh = { 0 };
+    CHECK(pg_view3d_mesh(&mesh, &m->project, m->chain, &o, &PG_VIEW_DARK));
+    CHECK(mesh.n_tri > 0 && mesh.n_tri % 3 == 0);
+    CHECK(mesh.n_glass == 36);                   /* the box: 6 faces x 2 tris */
+
+    int bad = 0;
+    for (int i = 0; i < mesh.n_tri; i++)
+        if (mesh.tri[i] >= (uint32_t)mesh.n_vert || mesh.vert[mesh.tri[i]].col[3] != 255)
+            bad++;
+    for (int i = 0; i < mesh.n_glass; i++)
+        if (mesh.glass[i] >= (uint32_t)mesh.n_vert || mesh.vert[mesh.glass[i]].col[3] == 255)
+            bad++;
+    CHECK(bad == 0);
+
+    int pieces = 0, engine = 0;
+    bool *seen = calloc((size_t)m->chain->n_pieces, 1);
+    for (int i = 0; i < mesh.n_vert; i++) {
+        int id = mesh.vert[i].id;
+        if (PG_PICK_IS_PIECE(id) && id < m->chain->n_pieces && !seen[id]) {
+            seen[id] = true;
+            pieces++;
+        }
+        if (id == PG_PICK_ENGINE)
+            engine++;
+    }
+    CHECK(pieces == m->chain->n_pieces);
+    CHECK(engine > 0);
+    free(seen);
+
+    int rings = 0;
+    for (int j = 0; j < m->chain->n_joints; j++)
+        for (int i = 0; i < mesh.n_line; i++)
+            if (mesh.line[i].id == PG_PICK_JOINT + j) {
+                rings++;
+                break;
+            }
+    CHECK(rings == m->chain->n_joints);
+
+    int n_vert = mesh.n_vert, n_line = mesh.n_line;
+    o.show_box = false;
+    CHECK(pg_view3d_mesh(&mesh, &m->project, m->chain, &o, &PG_VIEW_DARK));
+    CHECK(mesh.n_glass == 0);
+    o.show_box = true;
+    CHECK(pg_view3d_mesh(&mesh, &m->project, m->chain, &o, &PG_VIEW_DARK));
+    CHECK(mesh.n_vert == n_vert && mesh.n_line == n_line);
+
+    pg_mesh_free(&mesh);
+    CHECK(mesh.vert == NULL && mesh.n_vert == 0);
+    pg_model_free(m);
+}
+
 TEST_MAIN("test_view3d",
     test_raster_depth();
     test_pick_chamber();
+    test_mesh();
 )

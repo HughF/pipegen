@@ -25,7 +25,11 @@ The default project is a **JLO L372 driving a generator at 2850 rpm**.
   reduction. Each sets the chamber's proportions, all of which can then be
   edited.
 - **3D design view** — orbit, pan, zoom, pick pieces and joints; colour by
-  section or by part; engine stub for scale; optional clearance box.
+  section or by part; engine stub for scale; optional clearance box. Drawn
+  with OpenGL 3.3 (multisampled, per-pixel lighting, exact picking); where
+  there is no OpenGL 3.3 — a VM without 3D, Remote Desktop, an old driver — it
+  falls back to its own software rasteriser, and `PIPEGEN_RENDERER=software`
+  forces that.
 - **Bending** — select a joint and Ctrl+drag (or type the angle and direction).
   Joints are mitred on the bisecting plane, so the centreline — and the wave
   timing — does not change. Clashes with the clearance box, the engine or the
@@ -168,7 +172,9 @@ Proven by the tests (`make test`):
 | `src/pg_pattern.*` | flat patterns and sheet nesting |
 | `src/pg_geom.*` | bulge polylines: exact arcs, boxes, areas |
 | `src/pg_dxf.*`, `src/pg_pdf.*`, `src/pg_report.*` | output |
-| `src/pg_raster.*`, `src/pg_view3d.*` | software rasteriser and 3D scene |
+| `src/pg_view3d.*` | 3D scene: camera and the mesh both renderers draw |
+| `src/pg_raster.*` | software rasteriser (PDF, `--render`, tests, fallback) |
+| `src/pg_gl.*`, `src/pg_glview.*`, `src/pg_nkgl.h` | OpenGL 3.3: loader, 3D view, interface drawing |
 | `src/pg_model.*` | a project and everything derived from it; export |
 | `src/pg_ui*.c`, `src/pg_draw.*`, `src/pg_theme.*` | interface |
 | `src/plat_posix.c`, `src/plat_win32.c` | the only OS-specific code |

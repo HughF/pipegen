@@ -4,6 +4,16 @@ All notable changes to pipegen. Versions are dates (YYYY.MM.DD).
 
 ## [Unreleased]
 
+### Changed
+
+- The 3D view and the interface are drawn with OpenGL 3.3. Orbiting a
+  1900 × 1200 view went from 41–64 ms a frame in software to under 3 ms
+  (AMD Radeon, Mesa), with 4× multisampling and per-pixel lighting; picking
+  reads the surface id from a second GPU pass. Without OpenGL 3.3 the program
+  falls back to the software renderer by itself; `PIPEGEN_RENDERER=software`
+  forces it, and About shows which is in use. The PDF, `--render` and the
+  tests still use the software rasteriser, from the same scene mesh.
+
 ### Added
 
 - Auto-fold (Route tab, and `--autofold compact|box` on the command line):

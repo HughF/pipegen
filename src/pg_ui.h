@@ -23,7 +23,20 @@ typedef struct {
     bool        wizard;      /* start in the New Project wizard            */
 } PgUiStart;
 
-PgUi *pg_ui_create(SDL_Window *win, SDL_Renderer *ren, const PgUiStart *start);
+struct PgGlView;
+
+/* What the interface draws with: an SDL_Renderer (the software path), or the
+ * window's current OpenGL 3.3 context and the 3D view made in it. */
+typedef struct {
+    SDL_Window      *win;
+    SDL_Renderer    *ren;        /* NULL when drawing with OpenGL              */
+    struct PgGlView *glview;     /* OpenGL only; the interface takes ownership */
+    const char      *renderer;   /* for the About box, e.g. the GL renderer    */
+} PgUiVideo;
+
+/* NULL on failure. On the OpenGL path the caller can then fall back to an
+ * SDL_Renderer; the 3D view has been freed either way. */
+PgUi *pg_ui_create(const PgUiVideo *video, const PgUiStart *start);
 void  pg_ui_destroy(PgUi *ui);
 
 void  pg_ui_fit_window(PgUi *ui, int base_w, int base_h);
@@ -32,10 +45,13 @@ void  pg_ui_input_begin(PgUi *ui);
 void  pg_ui_input_end(PgUi *ui);
 bool  pg_ui_handle_event(PgUi *ui, SDL_Event *e);
 
+/* The drawable's size in pixels, which the frame is laid out in. */
+void  pg_ui_output_size(const PgUi *ui, int *w, int *h);
 void  pg_ui_frame(PgUi *ui, int win_w, int win_h);
-void  pg_ui_render(PgUi *ui);
 
-void  pg_ui_clear_colour(const PgUi *ui, Uint8 *r, Uint8 *g, Uint8 *b);
+/* Clear, draw the frame and show it. */
+void  pg_ui_present(PgUi *ui);
+
 bool  pg_ui_quit_requested(const PgUi *ui);
 
 /* True while work is running in the background of the frame loop (an

@@ -220,4 +220,5 @@ Parts are turned to their flattest orientation and placed in rows on sheets of t
 | **Settings** | Theme, folders, recent projects and export choices, in ~/.config/pipegen/settings.conf, or %APPDATA%\pipegen\settings.conf on Windows. |
 | **Command line** | pipegen --project FILE --export DIR NAME writes the exports without opening a window; --autofold compact (or box) folds it first, --save FILE keeps the result, and --render FILE.ppm renders the 3D view. --help lists the rest. |
 | **PIPEGEN_SCALE** | Environment variable overriding the HiDPI scale. |
+| **PIPEGEN_RENDERER** | Set to software to draw without OpenGL. The program falls back to this by itself when there is no OpenGL 3.3; About shows which is in use. |
 

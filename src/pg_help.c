@@ -330,6 +330,9 @@ static const PgHelpItem it_files[] = {
                        "and --render FILE.ppm renders the 3D view. --help "
                        "lists the rest."),
     R("PIPEGEN_SCALE", "Environment variable overriding the HiDPI scale."),
+    R("PIPEGEN_RENDERER", "Set to software to draw without OpenGL. The program "
+      "falls back to this by itself when there is no OpenGL 3.3; About shows "
+      "which is in use."),
 };
 
 #define SEC(title, intro, items) \

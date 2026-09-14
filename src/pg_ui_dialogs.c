@@ -461,6 +461,9 @@ static void about_body(PgUi *ui)
                  linked.major, linked.minor, linked.patch,
                  SDL_MAJOR_VERSION, SDL_MINOR_VERSION, SDL_PATCHLEVEL);
     ui_info_rowf(ui, "UI scale", "%.2f  (override with PIPEGEN_SCALE)", (double)ui->scale);
+    ui_info_row(ui, "Graphics", ui->renderer);
+    if (ui->glv)
+        ui_info_row(ui, "", "PIPEGEN_RENDERER=software to draw without OpenGL");
     ui_gap(ui, 6);
     ui_section(ui, "Licence");
     ui_info_row(ui, "Licence", "GPL-3.0-or-later");

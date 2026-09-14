@@ -14,6 +14,7 @@
 #include "pg_vec.h"
 
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define DEG (M_PI / 180.0)
@@ -43,14 +44,7 @@ const PgViewStyle PG_VIEW_LIGHT = {
 /* Camera                                                              */
 /* ------------------------------------------------------------------ */
 
-typedef struct {
-    double eye[3], f[3], r[3], u[3];
-    double F;                          /* focal length, pixels   */
-    double cx, cy;
-    double near;
-} Basis;
-
-static void basis(const PgCamera *cam, int w, int h, Basis *b)
+void pg_camera_frame(const PgCamera *cam, int w, int h, PgViewFrame *b)
 {
     double cp = cos(cam->pitch), sp = sin(cam->pitch);
     double off[3] = { cp * sin(cam->yaw), sp, cp * cos(cam->yaw) };
@@ -62,10 +56,16 @@ static void basis(const PgCamera *cam, int w, int h, Basis *b)
         v3_set(b->r, 1.0, 0.0, 0.0);
     v3_norm(b->r);
     v3_cross(b->u, b->r, b->f);
-    b->F = (h / 2.0) / tan(cam->fov / 2.0);
+    b->focal = (h / 2.0) / tan(cam->fov / 2.0);
     b->cx = w / 2.0;
     b->cy = h / 2.0;
-    b->near = fmax(1.0, cam->dist * 0.002);
+    b->near_z = fmax(1.0, cam->dist * 0.002);
+
+    /* key light from above, over the viewer's shoulder */
+    for (int i = 0; i < 3; i++)
+        b->light[i] = 0.55 * b->u[i] - 0.45 * b->f[i] + 0.25 * b->r[i];
+    b->light[1] += 0.5;
+    v3_norm(b->light);
 }
 
 void pg_camera_default(PgCamera *cam)
@@ -158,8 +158,8 @@ void pg_camera_orbit(PgCamera *cam, double dx_px, double dy_px)
 
 void pg_camera_pan(PgCamera *cam, double dx_px, double dy_px, int view_h)
 {
-    Basis b;
-    basis(cam, 1, view_h, &b);
+    PgViewFrame b;
+    pg_camera_frame(cam, 1, view_h, &b);
     double wpp = 2.0 * cam->dist * tan(cam->fov / 2.0) / view_h;
     v3_add_scaled(cam->target, cam->target, b.r, -dx_px * wpp);
     v3_add_scaled(cam->target, cam->target, b.u, dy_px * wpp);
@@ -168,8 +168,8 @@ void pg_camera_pan(PgCamera *cam, double dx_px, double dy_px, int view_h)
 void pg_camera_zoom_at(PgCamera *cam, double factor, double sx, double sy,
                        int view_w, int view_h)
 {
-    Basis b;
-    basis(cam, view_w, view_h, &b);
+    PgViewFrame b;
+    pg_camera_frame(cam, view_w, view_h, &b);
     double wpp = 2.0 * cam->dist * tan(cam->fov / 2.0) / view_h;
     double p[3];
     v3_add_scaled(p, cam->target, b.r, (sx - view_w / 2.0) * wpp);
@@ -187,26 +187,413 @@ void pg_camera_zoom_at(PgCamera *cam, double factor, double sx, double sy,
 bool pg_camera_project(const PgCamera *cam, int view_w, int view_h,
                        const double p[3], double *sx, double *sy)
 {
-    Basis b;
-    basis(cam, view_w, view_h, &b);
+    PgViewFrame b;
+    pg_camera_frame(cam, view_w, view_h, &b);
     double d[3];
     v3_sub(d, p, b.eye);
     double vz = v3_dot(d, b.f);
-    if (vz < b.near)
+    if (vz < b.near_z)
         return false;
-    *sx = b.cx + v3_dot(d, b.r) / vz * b.F;
-    *sy = b.cy - v3_dot(d, b.u) / vz * b.F;
+    *sx = b.cx + v3_dot(d, b.r) / vz * b.focal;
+    *sy = b.cy - v3_dot(d, b.u) / vz * b.focal;
     return true;
 }
 
 /* ------------------------------------------------------------------ */
-/* Emitting geometry                                                   */
+/* Building the mesh                                                   */
+/* ------------------------------------------------------------------ */
+
+static void *grow(void *buf, int *cap, int need, size_t size, bool *oom)
+{
+    if (need <= *cap)
+        return buf;
+    int n = *cap ? *cap : 1024;
+    while (n < need)
+        n *= 2;
+    void *p = realloc(buf, (size_t)n * size);
+    if (!p) {
+        *oom = true;
+        return buf;
+    }
+    *cap = n;
+    return p;
+}
+
+static uint8_t byte(float v)
+{
+    return (uint8_t)(v <= 0.0f ? 0 : v >= 255.0f ? 255 : (int)(v + 0.5f));
+}
+
+/* A quad (0,1,2)(0,2,3). No normals: drawn unlit. */
+static void mesh_quad(PgMesh *m, const double *p[4], const double *n[4],
+                      const float col[3], float alpha, int32_t id)
+{
+    bool glass = alpha < 1.0f;
+    m->vert = grow(m->vert, &m->cap_vert, m->n_vert + 4, sizeof *m->vert, &m->oom);
+    if (glass)
+        m->glass = grow(m->glass, &m->cap_glass, m->n_glass + 6, sizeof *m->glass, &m->oom);
+    else
+        m->tri = grow(m->tri, &m->cap_tri, m->n_tri + 6, sizeof *m->tri, &m->oom);
+    if (m->oom)
+        return;
+
+    uint32_t base = (uint32_t)m->n_vert;
+    for (int i = 0; i < 4; i++) {
+        PgMeshVert *v = &m->vert[m->n_vert++];
+        for (int k = 0; k < 3; k++) {
+            v->p[k] = (float)p[i][k];
+            v->n[k] = n ? (float)n[i][k] : 0.0f;
+            v->col[k] = byte(col[k]);
+        }
+        v->col[3] = glass ? byte(alpha * 255.0f) : 255;
+        v->id = id;
+        v->bias = 0.0f;
+    }
+    const uint32_t idx[6] = { base, base + 1, base + 2, base, base + 2, base + 3 };
+    if (glass) {
+        memcpy(m->glass + m->n_glass, idx, sizeof idx);
+        m->n_glass += 6;
+    } else {
+        memcpy(m->tri + m->n_tri, idx, sizeof idx);
+        m->n_tri += 6;
+    }
+}
+
+static void mesh_line(PgMesh *m, const double a[3], const double b[3],
+                      const uint8_t col[3], float width, int32_t id, float bias)
+{
+    m->line = grow(m->line, &m->cap_line, m->n_line + 1, sizeof *m->line, &m->oom);
+    if (m->oom)
+        return;
+    PgMeshLine *l = &m->line[m->n_line++];
+    for (int k = 0; k < 3; k++) {
+        l->a[k] = (float)a[k];
+        l->b[k] = (float)b[k];
+        l->col[k] = col[k];
+    }
+    l->col[3] = 255;
+    l->id = id;
+    l->width = width;
+    l->bias = bias;
+}
+
+static void mix(float c[3], const uint8_t with[3], float t)
+{
+    for (int i = 0; i < 3; i++)
+        c[i] = c[i] + ((float)with[i] - c[i]) * t;
+}
+
+static void section_colour(const PgPiece *pc, float out[3])
+{
+    /* indexed by PgSectionKind */
+    static const float pal[][3] = {
+        { 204, 152,  96 },     /* header          */
+        {  98, 150, 214 },     /* diffuser        */
+        {  96, 186, 172 },     /* belly           */
+        { 214, 128,  96 },     /* baffle          */
+        { 176, 178, 188 },     /* stinger         */
+    };
+    int k = (int)pc->sec_kind;
+    if (k < 0 || k > 4)
+        k = 4;
+    memcpy(out, pal[k], sizeof pal[k]);
+    /* diffuser stages lighten along the chamber */
+    if (pc->sec_kind == PG_SEC_DIFFUSER && pc->stage > 1)
+        for (int i = 0; i < 3; i++)
+            out[i] = fmin(255.0f, out[i] + 22.0f * (pc->stage - 1));
+}
+
+static void piece_colour(const PgPiece *pc, int index, const PgViewOpts *o,
+                         const PgViewStyle *st, float out[3])
+{
+    if (pc->kind == PG_PIECE_DUCT) {
+        for (int i = 0; i < 3; i++)
+            out[i] = st->engine[i];
+        return;
+    }
+    switch (o->colour) {
+    case PG_COLOUR_SECTION:
+        section_colour(pc, out);
+        break;
+    case PG_COLOUR_PART: {
+        static const float a[3] = { 196, 202, 212 }, b[3] = { 140, 150, 168 };
+        memcpy(out, (index % 2) ? b : a, sizeof a);
+        if (pc->kind == PG_PIECE_TUBE) {
+            out[0] = 186; out[1] = 166; out[2] = 120;
+        }
+        break;
+    }
+    default:
+        out[0] = 186; out[1] = 190; out[2] = 198;
+    }
+
+    if (o->highlight_section >= 0 && pc->section == o->highlight_section)
+        mix(out, st->hover, 0.45f);
+    if (pc->clash || pc->bad_mitre)
+        mix(out, st->clash, 0.6f);
+    if (o->hover_id == index)
+        mix(out, st->hover, 0.35f);
+    if (o->select_id == index)
+        mix(out, st->select, 0.55f);
+}
+
+static void build_piece(PgMesh *m, const PgProject *pr, const PgChain *c,
+                        int index, const PgViewOpts *o, const PgViewStyle *st)
+{
+    const PgPiece *pc = &c->piece[index];
+    double t = pr->build.thickness_mm;
+    double rA = pc->d0 / 2.0 + t, rB = pc->d1 / 2.0 + t;
+    double k = pc->len > 0.0 ? (rB - rA) / pc->len : 0.0;
+
+    float base[3];
+    piece_colour(pc, index, o, st, base);
+
+    double dmax = 2.0 * fmax(rA, rB);
+    int rings = (int)ceil(pc->len / fmax(25.0, 0.6 * dmax));
+    if (rings < 1) rings = 1;
+    if (rings > 24) rings = 24;
+
+    enum { MAXR = 25 };
+    static double P[MAXR][AROUND + 1][3], N[MAXR][AROUND + 1][3];
+    for (int a = 0; a <= AROUND; a++) {
+        double psi = 2.0 * M_PI * a / AROUND;
+        double z0 = pg_piece_end_z(pc, rA, rB, psi, 0);
+        double z1 = pg_piece_end_z(pc, rA, rB, psi, 1);
+        double c0 = cos(psi), s0 = sin(psi);
+        double nrm[3];
+        for (int q = 0; q < 3; q++)
+            nrm[q] = pc->ref[q] * c0 + pc->side[q] * s0 - pc->axis[q] * k;
+        v3_norm(nrm);
+        for (int j = 0; j <= rings; j++) {
+            double z = z0 + (z1 - z0) * j / rings;
+            pg_piece_point(pc, rA, rB, psi, z, P[j][a]);
+            v3_copy(N[j][a], nrm);
+        }
+    }
+    for (int j = 0; j < rings; j++) {
+        for (int a = 0; a < AROUND; a++) {
+            const double *p[4] = { P[j][a], P[j + 1][a], P[j + 1][a + 1], P[j][a + 1] };
+            const double *n[4] = { N[j][a], N[j + 1][a], N[j + 1][a + 1], N[j][a + 1] };
+            mesh_quad(m, p, n, base, 1.0f, index);
+        }
+    }
+
+    if (pc->kind == PG_PIECE_DUCT)
+        return;
+
+    /* seams */
+    if (o->show_seams && pr->build.method == PG_MFG_ROLLED &&
+        pc->kind == PG_PIECE_SHEET) {
+        double psi = pr->route.seam_deg * DEG;
+        double z0 = pg_piece_end_z(pc, rA, rB, psi, 0);
+        double z1 = pg_piece_end_z(pc, rA, rB, psi, 1);
+        double a3[3], b3[3];
+        pg_piece_point(pc, rA + 0.4, rB + 0.4, psi, z0, a3);
+        pg_piece_point(pc, rA + 0.4, rB + 0.4, psi, z1, b3);
+        mesh_line(m, a3, b3, st->seam, 1.6f, index, 0.002f);
+    }
+
+    /* hydroforming flanges: thin fins along both seams */
+    if (pr->build.method == PG_MFG_HYDRO && pc->kind == PG_PIECE_SHEET) {
+        double fin = pr->build.hydro_margin_mm + 2.0;
+        float fcol[3] = { base[0] * 0.8f, base[1] * 0.8f, base[2] * 0.8f };
+        for (int sgn = 0; sgn < 2; sgn++) {
+            double psi = (pr->route.seam_deg + 90.0 + 180.0 * sgn) * DEG;
+            double z0 = pg_piece_end_z(pc, rA, rB, psi, 0);
+            double z1 = pg_piece_end_z(pc, rA, rB, psi, 1);
+            double p0[3], p1[3], p2[3], p3[3], nrm[3];
+            pg_piece_point(pc, rA, rB, psi, z0, p0);
+            pg_piece_point(pc, rA, rB, psi, z1, p1);
+            pg_piece_point(pc, rA + fin, rB + fin, psi, z1, p2);
+            pg_piece_point(pc, rA + fin, rB + fin, psi, z0, p3);
+            double e1[3], e2[3];
+            v3_sub(e1, p1, p0);
+            v3_sub(e2, p3, p0);
+            v3_cross(nrm, e1, e2);
+            v3_norm(nrm);
+            const double *pp[4] = { p0, p1, p2, p3 };
+            const double *nn[4] = { nrm, nrm, nrm, nrm };
+            mesh_quad(m, pp, nn, fcol, 1.0f, index);
+        }
+    }
+}
+
+static void build_joints(PgMesh *m, const PgProject *pr, const PgChain *c,
+                         const PgViewOpts *o, const PgViewStyle *st)
+{
+    double t = pr->build.thickness_mm;
+    for (int j = 0; j < c->n_joints; j++) {
+        const PgJoint *jt = &c->joint[j];
+        const PgPiece *pc = &c->piece[jt->before];
+        int32_t id = PG_PICK_JOINT + j;
+        double rA = pc->d0 / 2.0 + t + 0.8, rB = pc->d1 / 2.0 + t + 0.8;
+
+        const uint8_t *col = st->joint;
+        float w = 2.4f;
+        if (jt->bend_deg > 1e-6) { col = jt->sharp ? st->sharp : st->bend; w = 3.2f; }
+        if (o->hover_id == id)   { col = st->hover; w = 4.5f; }
+        if (o->select_id == id)  { col = st->select; w = 5.0f; }
+
+        double prev[3];
+        for (int a = 0; a <= AROUND; a++) {
+            double psi = 2.0 * M_PI * a / AROUND, p[3];
+            pg_piece_point(pc, rA, rB, psi, pg_piece_end_z(pc, rA, rB, psi, 1), p);
+            if (a)
+                mesh_line(m, prev, p, col, w, id, 0.003f);
+            v3_copy(prev, p);
+        }
+    }
+}
+
+static void cylinder(PgMesh *m, double r, double y0, double y1, const float col[3],
+                     bool caps)
+{
+    const int N = 40;
+    for (int a = 0; a < N; a++) {
+        double t0 = 2.0 * M_PI * a / N, t1 = 2.0 * M_PI * (a + 1) / N;
+        double p0[3] = { r * cos(t0), y0, r * sin(t0) };
+        double p1[3] = { r * cos(t1), y0, r * sin(t1) };
+        double p2[3] = { r * cos(t1), y1, r * sin(t1) };
+        double p3[3] = { r * cos(t0), y1, r * sin(t0) };
+        double n0[3] = { cos(t0), 0, sin(t0) }, n1[3] = { cos(t1), 0, sin(t1) };
+        const double *pp[4] = { p0, p1, p2, p3 };
+        const double *nn[4] = { n0, n1, n1, n0 };
+        mesh_quad(m, pp, nn, col, 1.0f, PG_PICK_ENGINE);
+        if (caps) {
+            double up[3] = { 0, 1, 0 }, dn[3] = { 0, -1, 0 };
+            double c1[3] = { 0, y1, 0 }, c0[3] = { 0, y0, 0 };
+            const double *top[4] = { c1, p3, p2, c1 };
+            const double *tn[4] = { up, up, up, up };
+            mesh_quad(m, top, tn, col, 1.0f, PG_PICK_ENGINE);
+            const double *bot[4] = { c0, p1, p0, c0 };
+            const double *bn[4] = { dn, dn, dn, dn };
+            mesh_quad(m, bot, bn, col, 1.0f, PG_PICK_ENGINE);
+        }
+    }
+}
+
+static void box_solid(PgMesh *m, const double mn[3], const double mx[3],
+                      const float col[3], int32_t id, float alpha, bool lit)
+{
+    static const int face[6][4] = {
+        { 0, 1, 3, 2 }, { 4, 6, 7, 5 }, { 0, 4, 5, 1 },
+        { 2, 3, 7, 6 }, { 0, 2, 6, 4 }, { 1, 5, 7, 3 },
+    };
+    static const double fn[6][3] = {
+        { -1, 0, 0 }, { 1, 0, 0 }, { 0, -1, 0 }, { 0, 1, 0 }, { 0, 0, -1 }, { 0, 0, 1 },
+    };
+    double v[8][3];
+    for (int i = 0; i < 8; i++)
+        v3_set(v[i], (i & 4) ? mx[0] : mn[0], (i & 2) ? mx[1] : mn[1],
+               (i & 1) ? mx[2] : mn[2]);
+    for (int f = 0; f < 6; f++) {
+        const double *pp[4] = { v[face[f][0]], v[face[f][1]], v[face[f][2]], v[face[f][3]] };
+        const double *nn[4] = { fn[f], fn[f], fn[f], fn[f] };
+        mesh_quad(m, pp, lit ? nn : NULL, col, alpha, id);
+    }
+}
+
+static void build_engine(PgMesh *m, const PgChain *c, const PgViewStyle *st)
+{
+    const PgStub *s = &c->stub;
+    float col[3] = { st->engine[0], st->engine[1], st->engine[2] };
+    float dark[3] = { col[0] * 0.8f, col[1] * 0.8f, col[2] * 0.8f };
+
+    /* barrel core, then cooling fins */
+    double core = s->port[0] + 4.0;
+    cylinder(m, core, s->barrel_y0, s->barrel_y1, dark, false);
+    double pitch = fmax(7.0, (s->barrel_y1 - s->barrel_y0) / 14.0);
+    for (double y = s->barrel_y0; y + 2.5 <= s->barrel_y1; y += pitch)
+        cylinder(m, s->barrel_r, y, y + 2.5, col, true);
+
+    cylinder(m, s->head_r, s->barrel_y1, s->head_y1, col, true);
+    cylinder(m, s->head_r * 0.18, s->head_y1, s->head_y1 + s->head_r * 0.35,
+             dark, true);                                   /* spark plug */
+    box_solid(m, s->case_min, s->case_max, dark, PG_PICK_ENGINE, 1.0f, true);
+}
+
+static void build_grid(PgMesh *m, const PgChain *c, bool with_engine,
+                       const PgViewStyle *st)
+{
+    double y = c->bmin[1];
+    if (with_engine && c->stub.case_min[1] < y)
+        y = c->stub.case_min[1];
+    y -= 2.0;
+
+    double span = fmax(c->bmax[0] - c->bmin[0], c->bmax[2] - c->bmin[2]);
+    double step = span > 3000.0 ? 250.0 : span > 1200.0 ? 100.0 : 50.0;
+    double x0 = floor((fmin(c->bmin[0], -400.0) - 200.0) / step) * step;
+    double x1 = ceil((c->bmax[0] + 200.0) / step) * step;
+    double z0 = floor((fmin(c->bmin[2], -400.0) - 200.0) / step) * step;
+    double z1 = ceil((fmax(c->bmax[2], 400.0) + 200.0) / step) * step;
+
+    for (double gx = x0; gx <= x1 + 1e-6; gx += step) {
+        bool major = fmod(fabs(gx), step * 5.0) < 1e-6;
+        double a[3] = { gx, y, z0 }, b[3] = { gx, y, z1 };
+        mesh_line(m, a, b, major ? st->grid_major : st->grid, 1.0f, -1, 0.0f);
+    }
+    for (double gz = z0; gz <= z1 + 1e-6; gz += step) {
+        bool major = fmod(fabs(gz), step * 5.0) < 1e-6;
+        double a[3] = { x0, y, gz }, b[3] = { x1, y, gz };
+        mesh_line(m, a, b, major ? st->grid_major : st->grid, 1.0f, -1, 0.0f);
+    }
+}
+
+static void build_box(PgMesh *m, const PgProject *pr, const PgChain *c,
+                      const PgViewStyle *st)
+{
+    const double *mn = pr->clear.min, *mx = pr->clear.max;
+    const uint8_t *col = c->n_clash_box ? st->clash : st->box;
+    double v[8][3];
+    for (int i = 0; i < 8; i++)
+        v3_set(v[i], (i & 4) ? mx[0] : mn[0], (i & 2) ? mx[1] : mn[1],
+               (i & 1) ? mx[2] : mn[2]);
+    static const int e[12][2] = {
+        { 0, 1 }, { 2, 3 }, { 4, 5 }, { 6, 7 }, { 0, 2 }, { 1, 3 },
+        { 4, 6 }, { 5, 7 }, { 0, 4 }, { 1, 5 }, { 2, 6 }, { 3, 7 },
+    };
+    for (int i = 0; i < 12; i++)
+        mesh_line(m, v[e[i][0]], v[e[i][1]], col, 1.8f, -1, 0.0f);
+
+    float fc[3] = { col[0], col[1], col[2] };
+    box_solid(m, mn, mx, fc, -1, 0.07f, false);
+}
+
+bool pg_view3d_mesh(PgMesh *m, const PgProject *pr, const PgChain *c,
+                    const PgViewOpts *o, const PgViewStyle *st)
+{
+    m->n_vert = m->n_tri = m->n_glass = m->n_line = 0;
+    m->oom = false;
+
+    if (o->show_grid && c->n_pieces > 0)
+        build_grid(m, c, o->show_engine, st);
+    if (o->show_engine)
+        build_engine(m, c, st);
+    for (int i = 0; i < c->n_pieces; i++)
+        if (o->show_engine || c->piece[i].kind != PG_PIECE_DUCT)
+            build_piece(m, pr, c, i, o, st);
+    build_joints(m, pr, c, o, st);
+    if (o->show_box && pr->clear.enabled)
+        build_box(m, pr, c, st);
+    return !m->oom;
+}
+
+void pg_mesh_free(PgMesh *m)
+{
+    free(m->vert);
+    free(m->tri);
+    free(m->glass);
+    free(m->line);
+    memset(m, 0, sizeof *m);
+}
+
+/* ------------------------------------------------------------------ */
+/* Drawing it in software                                              */
 /* ------------------------------------------------------------------ */
 
 typedef struct {
-    PgRaster *r;
-    Basis     b;
-    double    light[3];
+    PgRaster   *r;
+    PgViewFrame b;
 } Ctx;
 
 typedef struct {
@@ -226,8 +613,8 @@ static void to_view(const Ctx *x, const double p[3], double v[3])
 static void project(const Ctx *x, const VVert *in, PgRVert *out)
 {
     double iz = 1.0 / in->v[2];
-    out->x = (float)(x->b.cx + in->v[0] * iz * x->b.F);
-    out->y = (float)(x->b.cy - in->v[1] * iz * x->b.F);
+    out->x = (float)(x->b.cx + in->v[0] * iz * x->b.focal);
+    out->y = (float)(x->b.cy - in->v[1] * iz * x->b.focal);
     out->iz = (float)iz;
     out->r = in->col[0];
     out->g = in->col[1];
@@ -248,7 +635,7 @@ static VVert lerp_near(const VVert *a, const VVert *b, double near)
 /* A triangle in view space, clipped against the near plane. */
 static void tri_view(Ctx *x, const VVert *t, int32_t id, float alpha, float bias)
 {
-    double near = x->b.near;
+    double near = x->b.near_z;
     VVert poly[4];
     int n = 0;
     for (int i = 0; i < 3; i++) {
@@ -283,10 +670,10 @@ static void shade(const Ctx *x, const double p[3], const double n_in[3],
         n[0] = -n[0]; n[1] = -n[1]; n[2] = -n[2];
         inside = 0.55;
     }
-    double diff = fmax(0.0, v3_dot(n, x->light));
+    double diff = fmax(0.0, v3_dot(n, x->b.light));
     double fill = fmax(0.0, v3_dot(n, vdir));
     double h[3];
-    v3_add_scaled(h, x->light, vdir, 1.0);
+    v3_add_scaled(h, x->b.light, vdir, 1.0);
     v3_norm(h);
     double spec = pow(fmax(0.0, v3_dot(n, h)), 40.0) * 90.0 * inside;
     double k = (0.26 + 0.58 * diff + 0.24 * fill) * inside;
@@ -294,32 +681,15 @@ static void shade(const Ctx *x, const double p[3], const double n_in[3],
         out[i] = (float)fmin(255.0, base[i] * k + spec);
 }
 
-static void quad_world(Ctx *x, const double *p[4], const double *n[4],
-                       const float base[3], int32_t id, float alpha, bool lit)
-{
-    VVert v[4];
-    for (int i = 0; i < 4; i++) {
-        to_view(x, p[i], v[i].v);
-        if (lit)
-            shade(x, p[i], n[i], base, v[i].col);
-        else
-            memcpy(v[i].col, base, sizeof v[i].col);
-    }
-    VVert t1[3] = { v[0], v[1], v[2] }, t2[3] = { v[0], v[2], v[3] };
-    tri_view(x, t1, id, alpha, 0.0f);
-    tri_view(x, t2, id, alpha, 0.0f);
-}
-
-static void line_world(Ctx *x, const double a[3], const double b[3],
-                       const uint8_t col[3], float width, int32_t id,
-                       float bias)
+static void line_view(Ctx *x, const PgMeshLine *l)
 {
     VVert v[2];
+    double a[3] = { l->a[0], l->a[1], l->a[2] }, b[3] = { l->b[0], l->b[1], l->b[2] };
     to_view(x, a, v[0].v);
     to_view(x, b, v[1].v);
     for (int k = 0; k < 3; k++)
-        v[0].col[k] = v[1].col[k] = col[k];
-    double near = x->b.near;
+        v[0].col[k] = v[1].col[k] = l->col[k];
+    double near = x->b.near_z;
     if (v[0].v[2] < near && v[1].v[2] < near)
         return;
     if (v[0].v[2] < near) v[0] = lerp_near(&v[0], &v[1], near);
@@ -327,326 +697,61 @@ static void line_world(Ctx *x, const double a[3], const double b[3],
     PgRVert p[2];
     project(x, &v[0], &p[0]);
     project(x, &v[1], &p[1]);
-    pg_raster_line(x->r, &p[0], &p[1], width, id, 1.0f, bias);
+    pg_raster_line(x->r, &p[0], &p[1], l->width, l->id, 1.0f, l->bias);
 }
 
-static void mix(float c[3], const uint8_t with[3], float t)
+static void tris_view(Ctx *x, const PgMesh *m, const VVert *vv,
+                      const uint32_t *idx, int n, bool glass)
 {
-    for (int i = 0; i < 3; i++)
-        c[i] = c[i] + ((float)with[i] - c[i]) * t;
+    for (int k = 0; k + 2 < n; k += 3) {
+        const PgMeshVert *first = &m->vert[idx[k]];
+        VVert t[3] = { vv[idx[k]], vv[idx[k + 1]], vv[idx[k + 2]] };
+        tri_view(x, t, first->id, glass ? first->col[3] / 255.0f : 1.0f, first->bias);
+    }
 }
 
-/* ------------------------------------------------------------------ */
-/* Scene parts                                                         */
-/* ------------------------------------------------------------------ */
-
-static void section_colour(const PgPiece *pc, const PgChain *c, float out[3])
+void pg_view3d_draw(PgRaster *r, const PgCamera *cam, const PgMesh *m,
+                    const PgViewStyle *st)
 {
-    /* indexed by PgSectionKind */
-    static const float pal[][3] = {
-        { 204, 152,  96 },     /* header          */
-        {  98, 150, 214 },     /* diffuser        */
-        {  96, 186, 172 },     /* belly           */
-        { 214, 128,  96 },     /* baffle          */
-        { 176, 178, 188 },     /* stinger         */
-    };
-    (void)c;
-    int k = (int)pc->sec_kind;
-    if (k < 0 || k > 4)
-        k = 4;
-    memcpy(out, pal[k], sizeof pal[k]);
-    /* diffuser stages lighten along the chamber */
-    if (pc->sec_kind == PG_SEC_DIFFUSER && pc->stage > 1)
-        for (int i = 0; i < 3; i++)
-            out[i] = fmin(255.0f, out[i] + 22.0f * (pc->stage - 1));
-}
-
-static void piece_colour(const PgPiece *pc, int index, const PgChain *c,
-                         const PgViewOpts *o, const PgViewStyle *st, float out[3])
-{
-    if (pc->kind == PG_PIECE_DUCT) {
-        for (int i = 0; i < 3; i++)
-            out[i] = st->engine[i];
-        return;
-    }
-    switch (o->colour) {
-    case PG_COLOUR_SECTION:
-        section_colour(pc, c, out);
-        break;
-    case PG_COLOUR_PART: {
-        static const float a[3] = { 196, 202, 212 }, b[3] = { 140, 150, 168 };
-        memcpy(out, (index % 2) ? b : a, sizeof a);
-        if (pc->kind == PG_PIECE_TUBE) {
-            out[0] = 186; out[1] = 166; out[2] = 120;
-        }
-        break;
-    }
-    default:
-        out[0] = 186; out[1] = 190; out[2] = 198;
-    }
-
-    if (o->highlight_section >= 0 && pc->section == o->highlight_section)
-        mix(out, st->hover, 0.45f);
-    if (pc->clash || pc->bad_mitre)
-        mix(out, st->clash, 0.6f);
-    if (o->hover_id == index)
-        mix(out, st->hover, 0.35f);
-    if (o->select_id == index)
-        mix(out, st->select, 0.55f);
-}
-
-static void draw_piece(Ctx *x, const PgProject *pr, const PgChain *c, int index,
-                       const PgViewOpts *o, const PgViewStyle *st)
-{
-    const PgPiece *pc = &c->piece[index];
-    double t = pr->build.thickness_mm;
-    double rA = pc->d0 / 2.0 + t, rB = pc->d1 / 2.0 + t;
-    double k = pc->len > 0.0 ? (rB - rA) / pc->len : 0.0;
-
-    float base[3];
-    piece_colour(pc, index, c, o, st, base);
-
-    double dmax = 2.0 * fmax(rA, rB);
-    int rings = (int)ceil(pc->len / fmax(25.0, 0.6 * dmax));
-    if (rings < 1) rings = 1;
-    if (rings > 24) rings = 24;
-
-    enum { MAXR = 25 };
-    static double P[MAXR][AROUND + 1][3], N[MAXR][AROUND + 1][3];
-    for (int a = 0; a <= AROUND; a++) {
-        double psi = 2.0 * M_PI * a / AROUND;
-        double z0 = pg_piece_end_z(pc, rA, rB, psi, 0);
-        double z1 = pg_piece_end_z(pc, rA, rB, psi, 1);
-        double c0 = cos(psi), s0 = sin(psi);
-        double nrm[3];
-        for (int m = 0; m < 3; m++)
-            nrm[m] = pc->ref[m] * c0 + pc->side[m] * s0 - pc->axis[m] * k;
-        v3_norm(nrm);
-        for (int j = 0; j <= rings; j++) {
-            double z = z0 + (z1 - z0) * j / rings;
-            pg_piece_point(pc, rA, rB, psi, z, P[j][a]);
-            v3_copy(N[j][a], nrm);
-        }
-    }
-    for (int j = 0; j < rings; j++) {
-        for (int a = 0; a < AROUND; a++) {
-            const double *p[4] = { P[j][a], P[j + 1][a], P[j + 1][a + 1], P[j][a + 1] };
-            const double *n[4] = { N[j][a], N[j + 1][a], N[j + 1][a + 1], N[j][a + 1] };
-            quad_world(x, p, n, base, index, 1.0f, true);
-        }
-    }
-
-    if (pc->kind == PG_PIECE_DUCT)
+    pg_raster_clear(r, st->bg_top, st->bg_bottom);
+    if (m->n_vert == 0 && m->n_line == 0)
         return;
 
-    /* seams */
-    if (o->show_seams && pr->build.method == PG_MFG_ROLLED &&
-        pc->kind == PG_PIECE_SHEET) {
-        double psi = pr->route.seam_deg * DEG;
-        double z0 = pg_piece_end_z(pc, rA, rB, psi, 0);
-        double z1 = pg_piece_end_z(pc, rA, rB, psi, 1);
-        double a3[3], b3[3];
-        pg_piece_point(pc, rA + 0.4, rB + 0.4, psi, z0, a3);
-        pg_piece_point(pc, rA + 0.4, rB + 0.4, psi, z1, b3);
-        line_world(x, a3, b3, st->seam, 1.6f, index, 0.002f);
+    Ctx x;
+    x.r = r;
+    pg_camera_frame(cam, r->w, r->h, &x.b);
+
+    /* Transform and light each vertex once; the quads share them. */
+    VVert *vv = malloc((size_t)(m->n_vert > 0 ? m->n_vert : 1) * sizeof *vv);
+    if (!vv)
+        return;
+    for (int i = 0; i < m->n_vert; i++) {
+        const PgMeshVert *mv = &m->vert[i];
+        double p[3] = { mv->p[0], mv->p[1], mv->p[2] };
+        double n[3] = { mv->n[0], mv->n[1], mv->n[2] };
+        float base[3] = { mv->col[0], mv->col[1], mv->col[2] };
+        to_view(&x, p, vv[i].v);
+        if (v3_dot(n, n) > 0.25)
+            shade(&x, p, n, base, vv[i].col);
+        else
+            memcpy(vv[i].col, base, sizeof base);
     }
 
-    /* hydroforming flanges: thin fins along both seams */
-    if (pr->build.method == PG_MFG_HYDRO && pc->kind == PG_PIECE_SHEET) {
-        double fin = pr->build.hydro_margin_mm + 2.0;
-        float fcol[3] = { base[0] * 0.8f, base[1] * 0.8f, base[2] * 0.8f };
-        for (int sgn = 0; sgn < 2; sgn++) {
-            double psi = (pr->route.seam_deg + 90.0 + 180.0 * sgn) * DEG;
-            double z0 = pg_piece_end_z(pc, rA, rB, psi, 0);
-            double z1 = pg_piece_end_z(pc, rA, rB, psi, 1);
-            double p0[3], p1[3], p2[3], p3[3], nrm[3];
-            pg_piece_point(pc, rA, rB, psi, z0, p0);
-            pg_piece_point(pc, rA, rB, psi, z1, p1);
-            pg_piece_point(pc, rA + fin, rB + fin, psi, z1, p2);
-            pg_piece_point(pc, rA + fin, rB + fin, psi, z0, p3);
-            double e1[3], e2[3];
-            v3_sub(e1, p1, p0);
-            v3_sub(e2, p3, p0);
-            v3_cross(nrm, e1, e2);
-            v3_norm(nrm);
-            const double *pp[4] = { p0, p1, p2, p3 };
-            const double *nn[4] = { nrm, nrm, nrm, nrm };
-            quad_world(x, pp, nn, fcol, index, 1.0f, true);
-        }
-    }
-}
-
-static void draw_joints(Ctx *x, const PgProject *pr, const PgChain *c,
-                        const PgViewOpts *o, const PgViewStyle *st)
-{
-    double t = pr->build.thickness_mm;
-    for (int j = 0; j < c->n_joints; j++) {
-        const PgJoint *jt = &c->joint[j];
-        const PgPiece *pc = &c->piece[jt->before];
-        int32_t id = PG_PICK_JOINT + j;
-        double rA = pc->d0 / 2.0 + t + 0.8, rB = pc->d1 / 2.0 + t + 0.8;
-
-        const uint8_t *col = st->joint;
-        float w = 2.4f;
-        if (jt->bend_deg > 1e-6) { col = jt->sharp ? st->sharp : st->bend; w = 3.2f; }
-        if (o->hover_id == id)   { col = st->hover; w = 4.5f; }
-        if (o->select_id == id)  { col = st->select; w = 5.0f; }
-
-        double prev[3];
-        for (int a = 0; a <= AROUND; a++) {
-            double psi = 2.0 * M_PI * a / AROUND, p[3];
-            pg_piece_point(pc, rA, rB, psi, pg_piece_end_z(pc, rA, rB, psi, 1), p);
-            if (a)
-                line_world(x, prev, p, col, w, id, 0.003f);
-            v3_copy(prev, p);
-        }
-    }
-}
-
-static void cylinder(Ctx *x, double r, double y0, double y1, const float col[3],
-                     bool caps)
-{
-    const int N = 40;
-    for (int a = 0; a < N; a++) {
-        double t0 = 2.0 * M_PI * a / N, t1 = 2.0 * M_PI * (a + 1) / N;
-        double p0[3] = { r * cos(t0), y0, r * sin(t0) };
-        double p1[3] = { r * cos(t1), y0, r * sin(t1) };
-        double p2[3] = { r * cos(t1), y1, r * sin(t1) };
-        double p3[3] = { r * cos(t0), y1, r * sin(t0) };
-        double n0[3] = { cos(t0), 0, sin(t0) }, n1[3] = { cos(t1), 0, sin(t1) };
-        const double *pp[4] = { p0, p1, p2, p3 };
-        const double *nn[4] = { n0, n1, n1, n0 };
-        quad_world(x, pp, nn, col, PG_PICK_ENGINE, 1.0f, true);
-        if (caps) {
-            double up[3] = { 0, 1, 0 }, dn[3] = { 0, -1, 0 };
-            double c1[3] = { 0, y1, 0 }, c0[3] = { 0, y0, 0 };
-            const double *top[4] = { c1, p3, p2, c1 };
-            const double *tn[4] = { up, up, up, up };
-            quad_world(x, top, tn, col, PG_PICK_ENGINE, 1.0f, true);
-            const double *bot[4] = { c0, p1, p0, c0 };
-            const double *bn[4] = { dn, dn, dn, dn };
-            quad_world(x, bot, bn, col, PG_PICK_ENGINE, 1.0f, true);
-        }
-    }
-}
-
-static void box_solid(Ctx *x, const double mn[3], const double mx[3],
-                      const float col[3], int32_t id, float alpha, bool lit)
-{
-    static const int face[6][4] = {
-        { 0, 1, 3, 2 }, { 4, 6, 7, 5 }, { 0, 4, 5, 1 },
-        { 2, 3, 7, 6 }, { 0, 2, 6, 4 }, { 1, 5, 7, 3 },
-    };
-    static const double fn[6][3] = {
-        { -1, 0, 0 }, { 1, 0, 0 }, { 0, -1, 0 }, { 0, 1, 0 }, { 0, 0, -1 }, { 0, 0, 1 },
-    };
-    double v[8][3];
-    for (int i = 0; i < 8; i++)
-        v3_set(v[i], (i & 4) ? mx[0] : mn[0], (i & 2) ? mx[1] : mn[1],
-               (i & 1) ? mx[2] : mn[2]);
-    for (int f = 0; f < 6; f++) {
-        const double *pp[4] = { v[face[f][0]], v[face[f][1]], v[face[f][2]], v[face[f][3]] };
-        const double *nn[4] = { fn[f], fn[f], fn[f], fn[f] };
-        quad_world(x, pp, nn, col, id, alpha, lit);
-    }
-}
-
-static void draw_engine(Ctx *x, const PgChain *c, const PgViewStyle *st)
-{
-    const PgStub *s = &c->stub;
-    float col[3] = { st->engine[0], st->engine[1], st->engine[2] };
-    float dark[3] = { col[0] * 0.8f, col[1] * 0.8f, col[2] * 0.8f };
-
-    /* barrel core, then cooling fins */
-    double core = s->port[0] + 4.0;
-    cylinder(x, core, s->barrel_y0, s->barrel_y1, dark, false);
-    double pitch = fmax(7.0, (s->barrel_y1 - s->barrel_y0) / 14.0);
-    for (double y = s->barrel_y0; y + 2.5 <= s->barrel_y1; y += pitch)
-        cylinder(x, s->barrel_r, y, y + 2.5, col, true);
-
-    cylinder(x, s->head_r, s->barrel_y1, s->head_y1, col, true);
-    cylinder(x, s->head_r * 0.18, s->head_y1, s->head_y1 + s->head_r * 0.35,
-             dark, true);                                   /* spark plug */
-    box_solid(x, s->case_min, s->case_max, dark, PG_PICK_ENGINE, 1.0f, true);
-}
-
-static void draw_grid(Ctx *x, const PgChain *c, bool with_engine,
-                      const PgViewStyle *st)
-{
-    double y = c->bmin[1];
-    if (with_engine && c->stub.case_min[1] < y)
-        y = c->stub.case_min[1];
-    y -= 2.0;
-
-    double span = fmax(c->bmax[0] - c->bmin[0], c->bmax[2] - c->bmin[2]);
-    double step = span > 3000.0 ? 250.0 : span > 1200.0 ? 100.0 : 50.0;
-    double x0 = floor((fmin(c->bmin[0], -400.0) - 200.0) / step) * step;
-    double x1 = ceil((c->bmax[0] + 200.0) / step) * step;
-    double z0 = floor((fmin(c->bmin[2], -400.0) - 200.0) / step) * step;
-    double z1 = ceil((fmax(c->bmax[2], 400.0) + 200.0) / step) * step;
-
-    for (double gx = x0; gx <= x1 + 1e-6; gx += step) {
-        bool major = fmod(fabs(gx), step * 5.0) < 1e-6;
-        double a[3] = { gx, y, z0 }, b[3] = { gx, y, z1 };
-        line_world(x, a, b, major ? st->grid_major : st->grid, 1.0f, -1, 0.0f);
-    }
-    for (double gz = z0; gz <= z1 + 1e-6; gz += step) {
-        bool major = fmod(fabs(gz), step * 5.0) < 1e-6;
-        double a[3] = { x0, y, gz }, b[3] = { x1, y, gz };
-        line_world(x, a, b, major ? st->grid_major : st->grid, 1.0f, -1, 0.0f);
-    }
-}
-
-static void draw_box(Ctx *x, const PgProject *pr, const PgChain *c,
-                     const PgViewStyle *st)
-{
-    const double *mn = pr->clear.min, *mx = pr->clear.max;
-    const uint8_t *col = c->n_clash_box ? st->clash : st->box;
-    double v[8][3];
-    for (int i = 0; i < 8; i++)
-        v3_set(v[i], (i & 4) ? mx[0] : mn[0], (i & 2) ? mx[1] : mn[1],
-               (i & 1) ? mx[2] : mn[2]);
-    static const int e[12][2] = {
-        { 0, 1 }, { 2, 3 }, { 4, 5 }, { 6, 7 }, { 0, 2 }, { 1, 3 },
-        { 4, 6 }, { 5, 7 }, { 0, 4 }, { 1, 5 }, { 2, 6 }, { 3, 7 },
-    };
-    for (int i = 0; i < 12; i++)
-        line_world(x, v[e[i][0]], v[e[i][1]], col, 1.8f, -1, 0.0f);
-}
-
-static void draw_box_faces(Ctx *x, const PgProject *pr, const PgChain *c,
-                           const PgViewStyle *st)
-{
-    const uint8_t *col = c->n_clash_box ? st->clash : st->box;
-    float fc[3] = { col[0], col[1], col[2] };
-    box_solid(x, pr->clear.min, pr->clear.max, fc, -1, 0.07f, false);
+    /* Opaque surfaces, then lines, then glass: the lines only need the
+     * surfaces' depth, and glass must go over everything it shows. */
+    tris_view(&x, m, vv, m->tri, m->n_tri, false);
+    for (int i = 0; i < m->n_line; i++)
+        line_view(&x, &m->line[i]);
+    tris_view(&x, m, vv, m->glass, m->n_glass, true);
+    free(vv);
 }
 
 void pg_view3d_render(PgRaster *r, const PgCamera *cam, const PgProject *pr,
                       const PgChain *c, const PgViewOpts *o,
                       const PgViewStyle *st)
 {
-    pg_raster_clear(r, st->bg_top, st->bg_bottom);
-
-    Ctx x;
-    x.r = r;
-    basis(cam, r->w, r->h, &x.b);
-    /* key light from above, over the viewer's shoulder */
-    for (int i = 0; i < 3; i++)
-        x.light[i] = 0.55 * x.b.u[i] - 0.45 * x.b.f[i] + 0.25 * x.b.r[i];
-    x.light[1] += 0.5;
-    v3_norm(x.light);
-
-    if (o->show_grid && c->n_pieces > 0)
-        draw_grid(&x, c, o->show_engine, st);
-    if (o->show_engine)
-        draw_engine(&x, c, st);
-    for (int i = 0; i < c->n_pieces; i++)
-        if (o->show_engine || c->piece[i].kind != PG_PIECE_DUCT)
-            draw_piece(&x, pr, c, i, o, st);
-    draw_joints(&x, pr, c, o, st);
-    if (o->show_box && pr->clear.enabled) {
-        draw_box(&x, pr, c, st);
-        draw_box_faces(&x, pr, c, st);
-    }
+    PgMesh m = { 0 };
+    pg_view3d_mesh(&m, pr, c, o, st);
+    pg_view3d_draw(r, cam, &m, st);
+    pg_mesh_free(&m);
 }
