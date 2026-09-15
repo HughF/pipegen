@@ -99,9 +99,12 @@ A chamber for a low-speed engine is long — over three metres for the JLO at 28
 
 | | |
 |---|---|
-| **1  Select a joint** | Click a joint ring in the view, or use Page Up and Page Down to step along the chamber. |
+| **1  Select a joint** | Click on or near a joint ring in the view — within about 10 pixels counts — or use Page Up and Page Down to step along the chamber. |
 | **2  Bend it** | Hold Ctrl and drag: up and down changes the angle, sideways turns the direction round the pipe. Add Shift to step 5 deg and 15 deg. Or type the values in the inspector, or use [ ] and , . |
-| **3  Check it** | Red pieces clash. The overlay and the status strip say what with. |
+| **3  Twist the rest** | Turn everything past the joint, as one piece, round the pipe coming into it: the Twist buttons on the joint panel, or Shift with , and . for 15 deg. Later bends keep their shape relative to each other; only where the rest of the pipe points changes. |
+| **4  Check it** | Red pieces clash. The overlay and the status strip say what with. |
+
+To wrap the pipe round something in the way — a frame member, a tank — set the clearance box round it on the Clearance tab and choose Keep out, so the box is an obstacle. Bend the pipe where it meets it, twist the rest round it, and carry on until nothing is red.
 
 Every joint is a mitre: both pieces are cut on the plane that bisects the bend, each at half its angle. The centreline is the same length bent as straight, so the wave timing does not change.
 

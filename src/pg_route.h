@@ -151,6 +151,12 @@ void pg_piece_point(const PgPiece *pc, double rA, double rB, double psi,
 /* The joint nearest a centreline position, or -1 if there are none. */
 int pg_chain_joint_near(const PgChain *c, double x);
 
+/* Turn the whole pipe past joint from_joint, as one piece, by deg round the
+ * axis of the pipe coming into that joint: every bend from that joint on
+ * turns its direction by deg, so later bends keep their shape relative to
+ * each other. Returns how many bends moved. c is the chain built from r. */
+int pg_route_twist(PgRoute *r, const PgChain *c, int from_joint, double deg);
+
 /* Words for a bend direction at the port ("down", "up" ...). */
 const char *pg_roll_name(double roll_deg);
 

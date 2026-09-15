@@ -16,6 +16,12 @@ All notable changes to pipegen. Versions are dates (YYYY.MM.DD).
 
 ### Added
 
+- Twist the rest of the pipe at a joint: everything past it turns as one
+  piece round the pipe coming in, with later bends keeping their shape — for
+  wrapping the chamber round an obstacle. Twist buttons on the joint panel
+  (half turns only when hydroformed), Shift+comma and Shift+full stop.
+- Joint rings are picked within about 10 pixels, not only on their few
+  pixels of line, unless something else is under the pointer in front.
 - Documentation of hydroforming compensation (README and manual): what seam
   compensation corrects — width, cone length, and bends closing up as the
   pipe inflates, with the flat-turn formula and a table — and what it does

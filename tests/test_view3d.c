@@ -204,8 +204,41 @@ static void test_mesh(void)
     pg_model_free(m);
 }
 
+/* The ring's hit area: a pointer a few pixels off the ring still finds it,
+ * one well clear of every ring does not. */
+static void test_pick_joint_near(void)
+{
+    PgModel *m = pg_model_new();
+    const int W = 480, H = 300;
+    PgCamera cam;
+    pg_camera_default(&cam);
+    pg_camera_preset(&cam, PG_VIEW_SIDE);
+    pg_camera_fit(&cam, m->chain, true, (double)W / H);
+
+    int j = m->chain->n_joints / 2;
+    const PgJoint *jt = &m->chain->joint[j];
+    const PgPiece *pc = &m->chain->piece[jt->before];
+    double top[3], sx, sy;
+    v3_add_scaled(top, jt->pos, (double[3]){ 0, 1, 0 },
+                  pc->d1 / 2.0 + m->project.build.thickness_mm + 0.8);
+    CHECK(pg_camera_project(&cam, W, H, top, &sx, &sy));
+
+    CHECK(pg_view3d_pick_joint(&cam, W, H, &m->project, m->chain, sx, sy, 10.0)
+          == PG_PICK_JOINT + j);
+    CHECK(pg_view3d_pick_joint(&cam, W, H, &m->project, m->chain, sx + 6.0, sy, 10.0)
+          == PG_PICK_JOINT + j);
+    CHECK(pg_view3d_pick_joint(&cam, W, H, &m->project, m->chain, sx, sy - 6.0, 10.0)
+          == PG_PICK_JOINT + j);
+    CHECK(pg_view3d_pick_joint(&cam, W, H, &m->project, m->chain, sx, sy - 60.0, 10.0)
+          == -1);
+    CHECK(pg_view3d_pick_joint(&cam, W, H, &m->project, m->chain, sx + 6.0, sy, 3.0)
+          == -1);
+    pg_model_free(m);
+}
+
 TEST_MAIN("test_view3d",
     test_raster_depth();
     test_pick_chamber();
     test_mesh();
+    test_pick_joint_near();
 )

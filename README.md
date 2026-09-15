@@ -32,6 +32,9 @@ The default project is a **JLO L372 driving a generator at 2850 rpm**.
   there is no OpenGL 3.3 — a VM without 3D, Remote Desktop, an old driver — it
   falls back to its own software rasteriser, and `PIPEGEN_RENDERER=software`
   forces that.
+- **Twisting** — turn everything past a joint, as one piece, round the pipe
+  coming into it, keeping the later bends' shape: wrap the chamber round an
+  obstacle (a keep-out clearance box) a joint at a time.
 - **Bending** — select a joint and Ctrl+drag (or type the angle and direction).
   Joints are mitred on the bisecting plane, so the centreline — and the wave
   timing — does not change. Clashes with the clearance box, the engine or the
@@ -130,9 +133,10 @@ make release                                 # both, plus SHA256SUMS.txt
 | Left drag | orbit |
 | Right or middle drag, Shift + left drag | pan |
 | Wheel | zoom about the pointer |
-| Click | select a piece or a joint ring |
+| Click | select a piece, or a joint ring (within about 10 px of it) |
 | Ctrl + drag on a selected joint | bend it (vertical: angle, horizontal: direction; + Shift to step) |
 | `[` `]` / `,` `.` | angle / direction of the selected joint |
+| Shift + `,` `.` | twist the rest of the pipe past the selected joint by 15° |
 | Page Up / Page Down | previous / next joint |
 | Delete | straighten the selected joint |
 | `F`, double-click | fit |

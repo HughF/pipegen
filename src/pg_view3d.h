@@ -145,6 +145,14 @@ bool pg_camera_project(const PgCamera *cam, int view_w, int view_h,
 
 void pg_camera_frame(const PgCamera *cam, int view_w, int view_h, PgViewFrame *fr);
 
+/* The joint whose ring passes nearest the screen point (sx, sy), if one is
+ * within radius_px: PG_PICK_JOINT + index, or -1. Rings are thin to look at;
+ * this is their hit area. It knows nothing of what hides a ring — the caller
+ * decides whether what is under the pointer lets it through. */
+int  pg_view3d_pick_joint(const PgCamera *cam, int view_w, int view_h,
+                          const PgProject *pr, const PgChain *c,
+                          double sx, double sy, double radius_px);
+
 /* Build the scene into m, reusing its allocations. False if out of memory
  * (m then holds part of the scene). */
 bool pg_view3d_mesh(PgMesh *m, const PgProject *pr, const PgChain *c,

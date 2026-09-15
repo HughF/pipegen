@@ -199,6 +199,56 @@ bool pg_camera_project(const PgCamera *cam, int view_w, int view_h,
     return true;
 }
 
+static double seg_dist(double px, double py, double ax, double ay, double bx, double by)
+{
+    double dx = bx - ax, dy = by - ay;
+    double l2 = dx * dx + dy * dy;
+    double t = l2 > 1e-12 ? ((px - ax) * dx + (py - ay) * dy) / l2 : 0.0;
+    t = t < 0.0 ? 0.0 : t > 1.0 ? 1.0 : t;
+    return hypot(px - (ax + dx * t), py - (ay + dy * t));
+}
+
+int pg_view3d_pick_joint(const PgCamera *cam, int w, int h, const PgProject *pr,
+                         const PgChain *c, double sx, double sy, double radius_px)
+{
+    PgViewFrame b;
+    pg_camera_frame(cam, w, h, &b);
+    double t = pr->build.thickness_mm;
+    int best = -1;
+    double best_d = radius_px;
+
+    /* the same ring the view draws for the joint */
+    for (int j = 0; j < c->n_joints; j++) {
+        const PgPiece *pc = &c->piece[c->joint[j].before];
+        double rA = pc->d0 / 2.0 + t + 0.8, rB = pc->d1 / 2.0 + t + 0.8;
+        double px = 0.0, py = 0.0;
+        bool prev = false;
+        for (int a = 0; a <= AROUND; a++) {
+            double psi = 2.0 * M_PI * a / AROUND, p[3], d[3];
+            pg_piece_point(pc, rA, rB, psi, pg_piece_end_z(pc, rA, rB, psi, 1), p);
+            v3_sub(d, p, b.eye);
+            double vz = v3_dot(d, b.f);
+            if (vz < b.near_z) {
+                prev = false;
+                continue;
+            }
+            double x = b.cx + v3_dot(d, b.r) / vz * b.focal;
+            double y = b.cy - v3_dot(d, b.u) / vz * b.focal;
+            if (prev) {
+                double dist = seg_dist(sx, sy, px, py, x, y);
+                if (dist < best_d) {
+                    best_d = dist;
+                    best = j;
+                }
+            }
+            px = x;
+            py = y;
+            prev = true;
+        }
+    }
+    return best < 0 ? -1 : PG_PICK_JOINT + best;
+}
+
 /* ------------------------------------------------------------------ */
 /* Building the mesh                                                   */
 /* ------------------------------------------------------------------ */

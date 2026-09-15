@@ -207,6 +207,23 @@ static void set_joint(PgUi *ui, int j, double bend, double roll)
         ui_message(ui, true, "At most %d bends.", PG_MAX_BENDS);
 }
 
+/* Turn the whole pipe past joint j round the pipe coming into it. */
+static void twist_from(PgUi *ui, int j, double deg)
+{
+    const PgChain *c = ui->model->chain;
+    if (j < 0 || j >= c->n_joints)
+        return;
+    if (ui->model->project.build.method == PG_MFG_HYDRO &&
+        fabs(remainder(deg, 180.0)) > 1e-6) {
+        ui_message(ui, true, "A hydroformed chamber bends only in the plane of "
+                   "its seams: it can be twisted in 180\xc2\xb0 steps.");
+        return;
+    }
+    if (pg_route_twist(&ui->model->project.route, c, j, deg) == 0)
+        ui_message(ui, false, "Nothing from this joint on is bent, so twisting "
+                   "changes nothing.");
+}
+
 static void select_joint_step(PgUi *ui, int step)
 {
     const PgChain *c = ui->model->chain;
@@ -250,8 +267,18 @@ bool design_handle_key(PgUi *ui, SDL_Keycode key, Uint16 mod)
     switch (key) {
     case SDLK_LEFTBRACKET:  set_joint(ui, j, bend - 5.0, roll); return true;
     case SDLK_RIGHTBRACKET: set_joint(ui, j, bend + 5.0, roll); return true;
-    case SDLK_COMMA:        set_joint(ui, j, bend, roll - 15.0); return true;
-    case SDLK_PERIOD:       set_joint(ui, j, bend, roll + 15.0); return true;
+    case SDLK_COMMA:
+        if (mod & KMOD_SHIFT)
+            twist_from(ui, j, -15.0);
+        else
+            set_joint(ui, j, bend, roll - 15.0);
+        return true;
+    case SDLK_PERIOD:
+        if (mod & KMOD_SHIFT)
+            twist_from(ui, j, 15.0);
+        else
+            set_joint(ui, j, bend, roll + 15.0);
+        return true;
     case SDLK_DELETE:
     case SDLK_BACKSPACE:    set_joint(ui, j, 0.0, 0.0); return true;
     default: return false;
@@ -285,6 +312,19 @@ static void view_input(PgUi *ui, struct nk_rect vr)
         else if (over)
             id = pg_raster_id_at(ui->raster, (int)((mx - vr.x) * ui->ss),
                                  (int)((my - vr.y) * ui->ss));
+        /* A ring is a few pixels wide. Near enough to one counts as on it,
+         * unless the pointer is on something else in front of it: only empty
+         * space or the two pieces the joint joins let it through. */
+        if (over && !PG_PICK_IS_JOINT(id)) {
+            int jid = pg_view3d_pick_joint(&ui->cam, (int)vr.w, (int)vr.h,
+                                           &ui->model->project, ch, mx - vr.x,
+                                           my - vr.y, S(ui, 10));
+            if (jid >= 0) {
+                const PgJoint *jt = &ch->joint[jid - PG_PICK_JOINT];
+                if (id < 0 || id == jt->before || id == jt->after)
+                    id = jid;
+            }
+        }
         if (id == PG_PICK_ENGINE)
             id = -1;
         if (id != ui->vopt.hover_id) {
@@ -921,6 +961,28 @@ static void panel_joint(PgUi *ui, int j)
             set_joint(ui, j, quick[i], roll);
     }
 
+    ui_section(ui, "Twist the rest of the pipe");
+    if (hydro) {
+        nk_layout_row_dynamic(c, S(ui, 28), 1);
+        ui_tip(ui, "Turn everything past this joint half a turn round the pipe "
+                   "coming into it. Hydroformed bends stay in the seam plane, so "
+                   "half turns are the only twist");
+        if (nk_button_label(c, "Twist 180\xc2\xb0"))
+            twist_from(ui, j, 180.0);
+    } else {
+        nk_layout_row_dynamic(c, S(ui, 28), 4);
+        static const double twist[4] = { -90, -15, 15, 90 };
+        for (int i = 0; i < 4; i++) {
+            char lab[16];
+            snprintf(lab, sizeof lab, "%+.0f\xc2\xb0", twist[i]);
+            ui_tip(ui, "Turn everything past this joint round the pipe coming "
+                       "into it, as one piece: later bends keep their shape "
+                       "(Shift+comma, Shift+full stop: 15\xc2\xb0)");
+            if (nk_button_label(c, lab))
+                twist_from(ui, j, twist[i]);
+        }
+    }
+
     nk_layout_row_dynamic(c, S(ui, 30), 3);
     ui_tip(ui, "Previous joint (Page Up)");
     if (nk_button_label(c, "\xe2\x86\x90 Prev"))
@@ -942,7 +1004,8 @@ static void panel_joint(PgUi *ui, int j)
     ui_gap(ui, 2);
     ui_label_wrap(ui, "In the view: Ctrl+drag up and down to change the angle, "
                   "sideways to turn the direction; add Shift to step. Keys: "
-                  "[ and ] angle, comma and full stop direction.", t->text_faint);
+                  "[ and ] angle, comma and full stop direction; with Shift, comma "
+                  "and full stop twist the rest of the pipe.", t->text_faint);
     if (hydro)
         ui_label_wrap(ui, "Hydroformed chambers bend only in the plane of their "
                       "seams; the direction is turned onto it.", t->warn);

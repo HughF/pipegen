@@ -279,6 +279,30 @@ static void place_pieces(const PgProject *pr, PgChain *c)
     }
 }
 
+/*
+ * Every bend's direction is measured round the pipe from a reference that is
+ * carried along the chain, bend by bend. Turning one joint's direction swings
+ * only that bend; the reference past it does not turn with it, so the later
+ * bends end up pointing somewhere new. Turning that joint and every later one
+ * by the same angle turns the whole pipe past the joint as one rigid piece,
+ * round the axis of the pipe coming into it.
+ */
+int pg_route_twist(PgRoute *r, const PgChain *c, int from_joint, double deg)
+{
+    int n = 0;
+    for (int k = from_joint < 0 ? 0 : from_joint; k < c->n_joints; k++) {
+        int i = c->joint[k].bend_index;
+        if (i < 0 || i >= r->n_bends)
+            continue;
+        double roll = fmod(r->bends[i].roll_deg + deg, 360.0);
+        if (roll < 0.0)
+            roll += 360.0;
+        r->bends[i].roll_deg = roll;
+        n++;
+    }
+    return n;
+}
+
 /* ---- checks ------------------------------------------------------------ */
 
 static bool in_box(const double *p, const double *mn, const double *mx)

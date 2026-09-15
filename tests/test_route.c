@@ -269,10 +269,70 @@ static void test_bad_mitre_and_hydro(void)
     free(c);
 }
 
+/* Twisting at a joint turns everything past it as one rigid piece round the
+ * pipe coming in, from a bent joint and from a straight one alike, and leaves
+ * everything before it where it was. */
+static void test_twist_is_rigid(void)
+{
+    PgProject p;
+    pg_project_default(&p);
+    p.build.segments = 3;
+    PgDesign d;
+    pg_design_compute(&p, &d);
+    PgChain *c = chain_for(&p, &d);
+    CHECK(c->n_joints > 9);
+    double x3 = c->joint[3].x, x6 = c->joint[6].x, x8 = c->joint[8].x;
+    free(c);
+    pg_route_set_bend(&p.route, x3, 1.0, 20.0, 0.0);
+    pg_route_set_bend(&p.route, x6, 1.0, 25.0, 90.0);
+    pg_route_set_bend(&p.route, x8, 1.0, 15.0, 200.0);
+    PgChain *a = chain_for(&p, &d);
+
+    static const struct { int from; double deg; int moved; } cases[] = {
+        { 3, 40.0, 3 },       /* at a bent joint    */
+        { 5, -70.0, 2 },      /* at a straight one  */
+    };
+    for (int k = 0; k < 2; k++) {
+        PgProject q = p;
+        CHECK(pg_route_twist(&q.route, a, cases[k].from, cases[k].deg) == cases[k].moved);
+        PgChain *b = chain_for(&q, &d);
+        CHECK(b->n_pieces == a->n_pieces);
+
+        const double *o = a->joint[cases[k].from].pos;
+        const double *axis = a->piece[a->joint[cases[k].from].before].axis;
+        double worst = 0.0;
+        for (int i = 0; i < a->n_pieces && i < b->n_pieces; i++) {
+            const double *ends_a[2] = { a->piece[i].p0, a->piece[i].p1 };
+            const double *ends_b[2] = { b->piece[i].p0, b->piece[i].p1 };
+            for (int e = 0; e < 2; e++) {
+                double w[3], want[3], diff[3];
+                v3_sub(w, ends_a[e], o);
+                if (i > a->joint[cases[k].from].before)
+                    v3_rotate(w, axis, cases[k].deg * M_PI / 180.0);
+                v3_add_scaled(want, o, w, 1.0);
+                v3_sub(diff, ends_b[e], want);
+                if (v3_len(diff) > worst)
+                    worst = v3_len(diff);
+            }
+        }
+        CHECK_NEAR(worst, 0.0, 1e-6);
+        CHECK_NEAR(centreline_length(b), centreline_length(a), 1e-6);
+        free(b);
+    }
+
+    /* the last joint's bend and nothing else */
+    PgProject q = p;
+    CHECK(pg_route_twist(&q.route, a, a->n_joints - 1, 30.0) == 0);
+    CHECK(pg_route_twist(&q.route, a, 8, 200.0) == 1);
+    CHECK_NEAR(q.route.bends[2].roll_deg, 40.0, 1e-9);     /* 200 + 200 - 360 */
+    free(a);
+}
+
 TEST_MAIN("test_route",
     test_straight();
     test_bend_keeps_length();
     test_mitre_matches();
     test_clashes();
     test_bad_mitre_and_hydro();
+    test_twist_is_rigid();
 )
