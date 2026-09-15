@@ -4,6 +4,8 @@ All notable changes to pipegen. Versions are dates (YYYY.MM.DD).
 
 ## [Unreleased]
 
+## [2026.09.15] — first release
+
 ### Changed
 
 - The 3D view and the interface are drawn with OpenGL 3.3. Orbiting a

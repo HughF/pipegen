@@ -20,7 +20,7 @@
 #define PG_VERSION_H
 
 #define PIPEGEN_NAME    "pipegen"
-#define PIPEGEN_VERSION "2026.09.14"
+#define PIPEGEN_VERSION "2026.09.15"
 #define PIPEGEN_TAGLINE "Two-stroke expansion chamber designer"
 
 #endif /* PG_VERSION_H */
