@@ -16,7 +16,8 @@ All notable changes to pipegen. Versions are dates (YYYY.MM.DD).
   pipegen.exe has to be allowed there, or the project saved elsewhere.
 - Errors in the file dialog wrap to their full length instead of being cut at
   two lines, and an old save error no longer shows up in About or the
-  unsaved-changes question.
+  unsaved-changes question. A message too long for the status bar shows in
+  full when the pointer is over it.
 
 ## [2026.09.15] — first release
 

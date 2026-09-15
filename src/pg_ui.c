@@ -732,9 +732,11 @@ static void draw_action(PgUi *ui, struct nk_rect r)
         nk_layout_row_template_push_static(c, S(ui, 520));
         nk_layout_row_template_end(c);
 
-        if (ui->msg[0])
+        if (ui->msg[0]) {
+            ui_tip(ui, ui->msg);           /* in full, when the bar cuts it */
             nk_label_colored(c, ui->msg, NK_TEXT_LEFT,
                              ui->msg_error ? t->alarm : t->text_dim);
+        }
         else
             nk_label_colored(c, PIPEGEN_TAGLINE, NK_TEXT_LEFT, t->text_faint);
 

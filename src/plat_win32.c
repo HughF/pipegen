@@ -73,10 +73,12 @@ void plat_write_error(char *buf, size_t cap, const char *path, int err)
     /* Controlled folder access refuses unrecognised programs in Documents,
      * Desktop and Pictures with a plain access-denied, even though the user
      * can write there from Explorer. Nothing here can or should get round it. */
+    /* The advice leads: the one-line status bar cuts the end off, and the
+     * path is on screen elsewhere. */
     if (err == EACCES)
-        snprintf(buf, cap, "Windows refused to let pipegen write %s. If "
-                 "Controlled folder access is on (Windows Security, Ransomware "
-                 "protection), allow pipegen.exe or save to another folder.", path);
+        snprintf(buf, cap, "Access denied. Controlled folder access (Windows "
+                 "Security) may be blocking pipegen.exe: allow it, or save "
+                 "elsewhere. (%s)", path);
     else
         snprintf(buf, cap, "Cannot write %s: %s.", path, strerror(err));
 }
