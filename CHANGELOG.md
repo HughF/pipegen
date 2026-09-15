@@ -16,6 +16,10 @@ All notable changes to pipegen. Versions are dates (YYYY.MM.DD).
 
 ### Added
 
+- Documentation of hydroforming compensation (README and manual): what seam
+  compensation corrects — width, cone length, and bends closing up as the
+  pipe inflates, with the flat-turn formula and a table — and what it does
+  not: stretch, springback, weld shrinkage, incomplete inflation.
 - Screenshots of the program and its PDF in the README (docs/screenshots/).
 - Auto-fold (Route tab, and `--autofold compact|box` on the command line):
   searches for the most compact layout, or the roomiest fit in the clearance

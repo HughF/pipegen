@@ -175,7 +175,15 @@ The chamber becomes two identical flat halves, welded together round their edges
 
 A half longer than the sheet is split across its width into pieces that each fit. Inflate them separately and butt-weld them.
 
-> **Note:** Seam compensation is a first-order model of how a sheet inflates. Inflate a test piece and measure it before cutting a full set.
+What seam compensation corrects. The seam barely stretches while the walls between the seams balloon out, so the flat outline is not the pipe unrolled:
+
+- Width: half the mean circumference, pi x D / 2, plus the weld margin.
+- Cones: on the flat half the edge steps out by pi/4 of the diameter change, on the inflated pipe by only 1/2 of it, so each cone is cut shorter flat than it is finished, with its edge as long as the wall it becomes.
+- Bends, which close up as the pipe inflates: across a bend the flat edge sits pi/2 times further from the centreline than the inflated seam, and pulls in as it inflates. The flat outline is cut with a gentler turn, 2 x atan((2/pi) x tan(bend / 2)): a 10° bend is cut at 6.4°, 15° at 9.6°, 20° at 12.8°, 25° at 16.1°, 30° at 19.4°. A bend too tight for the halves, where the inner edge would fold over itself, gets a warning.
+
+Not corrected for: stretch and thinning of the steel under pressure, springback when the pressure comes off, weld shrinkage and distortion, and metal next to the seam that never goes fully round — more so with a wide weld margin or low pressure. Hydroformed bends can only be made in the plane of the seam welds.
+
+> **Note:** Seam compensation is a first-order geometric model, not yet checked against a real inflated piece. Inflate one bent segment, measure its finished bend angle and length against the design, and adjust before cutting a full set.
 
 ### Sheets and layout
 

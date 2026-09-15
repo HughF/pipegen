@@ -161,6 +161,56 @@ the port across the speed range.
 
 It gives a sound starting geometry. **It is not a gas-dynamic simulation.**
 
+## Hydroforming compensation
+
+Two flat halves welded at their edges are inflated into a pipe. The weld
+seam barely stretches; the walls between the seams balloon out into
+half-rounds. So the flat outline cannot simply be the pipe unrolled. With
+**seam compensation** on (Build tab, on by default) pipegen sizes each half
+for three things:
+
+- **Width.** Each half is half the mean circumference, πD/2, plus the weld
+  margin, so it inflates to the design diameter.
+- **Cones.** On the flat half the edge steps out by π/4 of the diameter
+  change; on the inflated pipe the seam steps out by only 1/2 of it. Each
+  cone's flat length is shortened so its edge is exactly as long as the
+  inflated wall it becomes.
+- **Bends — the curvature closing up.** Across a bend the flat edge sits π/2
+  times further from the centreline than the inflated seam does, so as the
+  pipe inflates the edge pulls in and the bend tightens. The flat outline is
+  therefore cut with a gentler turn than the finished bend:
+
+      flat turn = 2 · atan((2/π) · tan(bend / 2))
+
+  | Finished bend | Cut in the flat |
+  |---|---|
+  | 10° | 6.4° |
+  | 15° | 9.6° |
+  | 20° | 12.8° |
+  | 25° | 16.1° |
+  | 30° | 19.4° |
+
+  A bend too tight for the halves — the inner edge of the flat outline would
+  fold over itself — is reported as a warning.
+
+**Not compensated for:**
+
+- stretch and thinning of the steel under pressure (the wall is assumed to
+  develop without changing length);
+- springback when the pressure is released;
+- weld shrinkage and distortion pulling the seam in;
+- incomplete inflation: the metal right next to the seam never goes fully
+  round, more so with a wide weld margin or low pressure.
+
+Hydroformed bends can only be made in the plane of the seam welds, so the
+chamber cannot be twisted out of that plane.
+
+These are first-order geometric models, and none has yet been checked
+against a real inflated piece. **Inflate one bent segment before cutting a
+set:** measure its finished bend angle and length against the design and
+adjust from there. If test pieces show a consistent error, a correction
+factor for bend angle and cone length is a small addition to make.
+
 ## What has and has not been proven
 
 Proven by the tests (`make test`):
@@ -185,7 +235,12 @@ Proven by the tests (`make test`):
 
 - **No part has been cut and rolled.** Check the first set against the
   full-size PDF templates before committing a sheet.
-- **Hydroforming compensation is a first-order model.** Inflate a test
+- **Hydroforming compensation is a first-order geometric model.** It sizes
+  the flat halves for the geometry of inflation — width, cone length, and the
+  way a bend closes up as the flat edge pulls in to the seam — but not for
+  stretch and thinning, springback, weld shrinkage, or metal next to the seam
+  that never goes fully round, and it has not been calibrated against real
+  inflated pieces. See *Hydroforming compensation* below. Inflate a test
   piece.
 - **The bend rules are rules of thumb**, not a flow simulation. A fold that
   keeps them should behave very close to the straight design; confirm it on
