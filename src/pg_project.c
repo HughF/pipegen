@@ -11,7 +11,9 @@
  * See the GNU General Public License in LICENSE for details.
  */
 #include "pg_project.h"
+#include "plat.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -603,7 +605,7 @@ bool pg_project_save(const PgProject *p, const char *path, char *err, size_t err
 
     FILE *f = fopen(path, "wb");
     if (!f) {
-        snprintf(err, errcap, "Cannot write %s.", path);
+        plat_write_error(err, errcap, path, errno);
         return false;
     }
     bool ok = fwrite(buf, 1, n, f) == n;

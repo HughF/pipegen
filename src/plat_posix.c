@@ -72,6 +72,11 @@ bool plat_config_dir(char *buf, size_t cap)
     return true;
 }
 
+void plat_write_error(char *buf, size_t cap, const char *path, int err)
+{
+    snprintf(buf, cap, "Cannot write %s: %s.", path, strerror(err));
+}
+
 bool plat_documents_dir(char *buf, size_t cap)
 {
     const char *home = getenv("HOME");

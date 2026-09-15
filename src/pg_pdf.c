@@ -14,6 +14,7 @@
 #include "pg_version.h"
 #include "plat.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -490,7 +491,7 @@ bool pg_pdf_save(PgPdf *p, const char *path, const char *title,
 
     FILE *f = fopen(path, "wb");
     if (!f) {
-        snprintf(err, errcap, "Cannot write %s.", path);
+        plat_write_error(err, errcap, path, errno);
         return false;
     }
 

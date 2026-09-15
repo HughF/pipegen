@@ -84,6 +84,7 @@ void ui_open_file_dialog(PgUi *ui, FileMode mode)
 void ui_open_confirm(PgUi *ui, Pending pending)
 {
     ui->pending = pending;
+    ui->dlg_error[0] = '\0';
     ui->dialog = DLG_CONFIRM;
 }
 
@@ -326,7 +327,7 @@ static bool file_commit(PgUi *ui)
     }
 
     if (!ui_save_to(ui, path)) {
-        snprintf(ui->dlg_error, sizeof ui->dlg_error, "%.190s", ui->msg);
+        snprintf(ui->dlg_error, sizeof ui->dlg_error, "%s", ui->msg);
         return false;
     }
     ui->dialog = DLG_NONE;
@@ -543,13 +544,22 @@ void ui_draw_dialog(PgUi *ui, int w, int h)
 
         float spacing = c->style.window.spacing.y;
         float pad_y = c->style.window.padding.y;
-        float msg_h = ui->dlg_error[0] ? S(ui, 38) + spacing : 0.0f;
-
         struct nk_rect region = nk_window_get_content_region(c);
-        float body_h = region.h - S(ui, BTN_H) - spacing - msg_h - pad_y
-                     - S(ui, DLG_BOTTOM_MARGIN);
-        if (body_h < S(ui, 60))
-            body_h = S(ui, 60);
+        /* An error wraps to as many lines as it needs, so a long one (the
+         * Windows folder-protection advice) is read in full. */
+        float err_h = ui->dlg_error[0]
+            ? ui_wrap_height(ui, ui->dlg_error, region.w - c->style.window.padding.x * 2.0f
+                                                - S(ui, 8)) + S(ui, 2)
+            : 0.0f;
+        float msg_h = ui->dlg_error[0] ? err_h + spacing : 0.0f;
+        float below = S(ui, BTN_H) + spacing + msg_h + pad_y + S(ui, DLG_BOTTOM_MARGIN);
+        float body_h = region.h - below;
+        /* The floor keeps a squeezed file browser usable. An autosized dialog
+         * is already as tall as its body, and a one-line body under the floor
+         * would push the buttons out of the window. */
+        float floor_h = autosize ? 1.0f : S(ui, 60);
+        if (body_h < floor_h)
+            body_h = floor_h;
         float chrome = nk_window_get_bounds(c).h - region.h;
         float used = 0.0f;
 
@@ -567,14 +577,17 @@ void ui_draw_dialog(PgUi *ui, int w, int h)
             used = nk_layout_widget_bounds(c).y - topb.y - c->style.window.spacing.y;
             nk_group_end(c);
         }
+        /* From `below`, not region.h - body_h: after a clamp that difference
+         * is short, and feeding it back shrank the dialog every frame until
+         * the buttons were gone. */
         if (autosize && used > 0.0f) {
-            ui->dlg_natural_h = chrome + (region.h - body_h) + used
+            ui->dlg_natural_h = chrome + below + used
                               + c->style.window.group_padding.y * 2.0f;
             ui->dlg_measured = showing;
         }
 
         if (ui->dlg_error[0]) {
-            nk_layout_row_dynamic(c, S(ui, 34), 1);
+            nk_layout_row_dynamic(c, err_h, 1);
             nk_label_colored_wrap(c, ui->dlg_error, t->alarm);
         }
 

@@ -698,8 +698,10 @@ static void draw_rail(PgUi *ui, struct nk_rect r)
         ui_gap(ui, 8);
         nk_layout_row_dynamic(c, S(ui, 30), 1);
         ui_tip(ui, "Version, build and licence");
-        if (nk_button_label(c, "About..."))
+        if (nk_button_label(c, "About...")) {
+            ui->dlg_error[0] = '\0';
             ui->dialog = DLG_ABOUT;
+        }
         nk_layout_row_dynamic(c, S(ui, 30), 1);
         ui_tip(ui, ui->dark ? "Switch to the light theme" : "Switch to the dark theme");
         if (nk_button_label(c, ui->dark ? "Light theme" : "Dark theme"))

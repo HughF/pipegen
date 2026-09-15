@@ -23,6 +23,7 @@
 
 #include <windows.h>
 #include <shlobj.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -65,6 +66,19 @@ bool plat_config_dir(char *buf, size_t cap)
         return false;
     CreateDirectoryA(buf, NULL);
     return plat_is_dir(buf);
+}
+
+void plat_write_error(char *buf, size_t cap, const char *path, int err)
+{
+    /* Controlled folder access refuses unrecognised programs in Documents,
+     * Desktop and Pictures with a plain access-denied, even though the user
+     * can write there from Explorer. Nothing here can or should get round it. */
+    if (err == EACCES)
+        snprintf(buf, cap, "Windows refused to let pipegen write %s. If "
+                 "Controlled folder access is on (Windows Security, Ransomware "
+                 "protection), allow pipegen.exe or save to another folder.", path);
+    else
+        snprintf(buf, cap, "Cannot write %s: %s.", path, strerror(err));
 }
 
 bool plat_documents_dir(char *buf, size_t cap)

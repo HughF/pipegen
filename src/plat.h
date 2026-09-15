@@ -72,4 +72,8 @@ typedef struct {
  * cannot be read. */
 int plat_dir_list(const char *dir, PlatDirEntry *out, int max);
 
+/* Why a file could not be opened for writing, for the user: `err` is the
+ * errno left by fopen. On Windows a refusal also names the likely cause. */
+void plat_write_error(char *buf, size_t cap, const char *path, int err);
+
 #endif /* PLAT_H */

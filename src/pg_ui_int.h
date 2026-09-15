@@ -113,7 +113,7 @@ struct PgUi {
 
     /* dialogs */
     PgDialog dialog;
-    char     dlg_error[200];
+    char     dlg_error[400];
     PgDialog dlg_measured;
     float    dlg_natural_h;
 

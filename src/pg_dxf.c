@@ -12,7 +12,9 @@
  */
 #include "pg_dxf.h"
 #include "pg_version.h"
+#include "plat.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
@@ -258,7 +260,7 @@ bool pg_dxf_write_layout(const char *path, const PgProject *pr,
 
     d.f = fopen(path, "w");
     if (!d.f) {
-        snprintf(err, errcap, "Cannot write %s.", path);
+        plat_write_error(err, errcap, path, errno);
         return false;
     }
     header(&d, d.minx, d.miny, d.maxx, d.maxy);
@@ -306,7 +308,7 @@ bool pg_dxf_write_part(const char *path, const PgProject *pr,
 
     d.f = fopen(path, "w");
     if (!d.f) {
-        snprintf(err, errcap, "Cannot write %s.", path);
+        plat_write_error(err, errcap, path, errno);
         return false;
     }
     header(&d, 0.0, 0.0, part->box.maxx - part->box.minx,

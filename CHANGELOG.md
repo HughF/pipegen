@@ -4,6 +4,20 @@ All notable changes to pipegen. Versions are dates (YYYY.MM.DD).
 
 ## [Unreleased]
 
+### Fixed
+
+- The unsaved-changes question had no buttons whenever its sentence fitted on
+  one line (a short project title, or a wide enough dialog, as seen on
+  Windows). Measuring its height fed back on itself and shrank the dialog by
+  16 px a frame until only the title bar was left.
+- A file that cannot be written now says why ("Permission denied", and so on)
+  instead of only "Cannot write". On Windows a refusal also points at
+  Controlled folder access, which blocks unrecognised programs from Documents;
+  pipegen.exe has to be allowed there, or the project saved elsewhere.
+- Errors in the file dialog wrap to their full length instead of being cut at
+  two lines, and an old save error no longer shows up in About or the
+  unsaved-changes question.
+
 ## [2026.09.15] — first release
 
 ### Changed
