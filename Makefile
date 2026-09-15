@@ -174,6 +174,8 @@ PG_VERSION := $(shell sed -n 's/.*PIPEGEN_VERSION "\([^"]*\)".*/\1/p' \
 PG_VER_A   := $(shell echo $(PG_VERSION) | cut -d. -f1 | sed 's/^0*//')
 PG_VER_B   := $(shell echo $(PG_VERSION) | cut -d. -f2 | sed 's/^0*//')
 PG_VER_C   := $(shell echo $(PG_VERSION) | cut -d. -f3 | sed 's/^0*//')
+# A second release on one day is YYYY.MM.DD.N; a plain date gives 0.
+PG_VER_D   := $(or $(shell echo $(PG_VERSION) | cut -s -d. -f4 | sed 's/^0*//'),0)
 
 WIN_OBJS = $(addprefix $(WIN_OBJ)/,\
              $(addsuffix .o,$(CORE) plat_win32 $(UI)))
@@ -211,6 +213,7 @@ $(WIN_RES): tools/win/pipegen.rc tools/win/pipegen.ico \
             tools/win/pipegen.manifest $(SRC_DIR)/pg_version.h | $(WIN_OBJ)
 	$(WIN_RC) -I tools/win -I $(SRC_DIR) \
 	    -DPG_VER_A=$(PG_VER_A) -DPG_VER_B=$(PG_VER_B) -DPG_VER_C=$(PG_VER_C) \
+    -DPG_VER_D=$(PG_VER_D) \
 	    -o $@ tools/win/pipegen.rc
 
 $(WIN_OBJ):

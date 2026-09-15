@@ -1,8 +1,11 @@
 # Changelog
 
-All notable changes to pipegen. Versions are dates (YYYY.MM.DD).
+All notable changes to pipegen. Versions are dates (YYYY.MM.DD), with .N for
+a second release on the same day.
 
 ## [Unreleased]
+
+## [2026.09.15.1] — Windows fixes
 
 ### Fixed
 
