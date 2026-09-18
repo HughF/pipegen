@@ -5,6 +5,17 @@ a second release on the same day.
 
 ## [Unreleased]
 
+### Fixed
+
+- A plain Save of a project that already had a file forgot the file name:
+  the project still wrote correctly, but the status bar then said "not
+  saved", and the next Save asked where to save instead of just saving.
+  Reopening the previous project at startup had the same defect on
+  `last_project`, losing it after one use. Both passed `ui->path` or
+  `settings.last_project` into a function that then overwrote that same
+  buffer with `snprintf`; copying a buffer into itself is undefined, and
+  glibc empties it.
+
 ## [2026.09.15.1] — Windows fixes
 
 ### Fixed

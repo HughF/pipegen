@@ -386,8 +386,15 @@ void ui_set_project(PgUi *ui, const PgProject *p, const char *path)
     ui->export_msg[0] = '\0';
 }
 
-bool ui_open_path(PgUi *ui, const char *path)
+bool ui_open_path(PgUi *ui, const char *where)
 {
+    /* Called with settings.last_project (rewritten below) at startup, and
+     * with settings.recent[i] from the Recent list: work from a copy (see
+     * ui_save_to). A self-overwriting snprintf is undefined, and glibc
+     * empties both sides — so `where` itself would go blank mid-function. */
+    char path[PLAT_PATH_MAX];
+    snprintf(path, sizeof path, "%s", where);
+
     PgProject p;
     char err[256] = "";
     if (!pg_project_load(&p, path, err, sizeof err)) {
@@ -409,8 +416,15 @@ bool ui_open_path(PgUi *ui, const char *path)
     return true;
 }
 
-bool ui_save_to(PgUi *ui, const char *path)
+bool ui_save_to(PgUi *ui, const char *where)
 {
+    /* A plain Save calls this with ui->path, which is rewritten below.
+     * snprintf from a buffer into itself is undefined, and glibc empties it:
+     * every plain Save of a project that already had a file forgot it, and
+     * the next Save asked where to save instead of just saving. */
+    char path[PLAT_PATH_MAX];
+    snprintf(path, sizeof path, "%s", where);
+
     char err[256];
     if (!pg_project_save(&ui->model->project, path, err, sizeof err)) {
         ui_message(ui, true, "%s", err);
