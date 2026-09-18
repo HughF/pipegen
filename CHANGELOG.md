@@ -5,6 +5,8 @@ a second release on the same day.
 
 ## [Unreleased]
 
+## [2026.09.18]
+
 ### Fixed
 
 - A plain Save of a project that already had a file forgot the file name:
