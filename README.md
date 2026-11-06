@@ -117,6 +117,29 @@ make appimage                                # dist/pipegen-<ver>-x86_64.AppImag
 make release                                 # both, plus SHA256SUMS.txt
 ```
 
+### Continuous integration
+
+`.github/workflows/build.yml` runs on every push and pull request. It builds and
+tests on Linux, builds the Windows and macOS binaries, starts each of them for a
+few seconds, and keeps them as artifacts of the run (Actions tab):
+
+- **`pipegen-windows-x64`**: the zip `make windows-dist` makes. It is built in an
+  Arch container so the toolchain is the one the released `.exe` has always used
+  (mingw-w64 against the UCRT); the job fails if the `.exe` would need
+  libgcc, libwinpthread or the old msvcrt on a clean machine, and a second job
+  starts it on a Windows runner.
+- **`pipegen-macos-universal`**: a `.dmg` holding a universal (Apple Silicon and
+  Intel) `pipegen.app` for macOS 11 and later, built against an SDL2 compiled from
+  source for that target. The job runs `make test` natively and starts both
+  slices from the mounted `.dmg`. To build it on a Mac, run
+  `tools/mac/build-sdl2.sh`, `tools/mac/build-universal.sh` and
+  `tools/mac/make-app.sh` in that order (each says what it takes in its header).
+  The app is ad-hoc signed, not notarised, so the first launch is right-click,
+  then Open.
+
+The smoke runs cannot click, so they show that the program starts, stays up and
+draws, not that it works. Nothing in CI publishes a release.
+
 ## Use
 
 ```sh
